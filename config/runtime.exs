@@ -37,8 +37,7 @@ if config_env() == :prod do
     # pool_count: 4,
     socket_options: maybe_ipv6,
     # Enable SSL for production databases (Render, etc.)
-    ssl: true,
-    ssl_opts: [
+    ssl: [
       verify: :verify_none
     ]
 

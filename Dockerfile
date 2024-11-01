@@ -44,11 +44,20 @@ RUN apk add --no-cache openssl ncurses-libs libstdc++
 
 WORKDIR /app
 
-RUN chown nobody:nobody /app
+COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/financial_advisor ./
+
+# Create a startup script that runs migrations then starts the server
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'set -e' >> /app/start.sh && \
+    echo 'cd /app' >> /app/start.sh && \
+    echo './bin/migrate || true' >> /app/start.sh && \
+    echo 'exec ./bin/financial_advisor start' >> /app/start.sh && \
+    chmod +x /app/start.sh && \
+    chown nobody:nobody /app/start.sh
+
+RUN chown -R nobody:nobody /app
 
 USER nobody:nobody
-
-COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/financial_advisor ./
 
 ENV HOME=/app
 
@@ -58,5 +67,5 @@ ENV PHX_SERVER=true
 
 EXPOSE 4000
 
-CMD ["./bin/financial_advisor", "start"]
+CMD ["/app/start.sh"]
 

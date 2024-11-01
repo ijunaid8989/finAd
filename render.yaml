@@ -39,8 +39,7 @@ services:
       - key: POOL_SIZE
         value: 10
     healthCheckPath: /
-    preDeployCommand: ./bin/migrate
-    dockerCommand: ./bin/financial_advisor start
+    dockerCommand: /app/start.sh
 
 databases:
   # PostgreSQL Database with pgvector
