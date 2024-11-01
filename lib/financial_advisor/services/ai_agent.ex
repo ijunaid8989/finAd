@@ -16,12 +16,13 @@ defmodule FinancialAdvisor.Services.AIAgent do
   import Ecto.Query
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
-  @model "claude-3-5-sonnet-20240620"
+  @default_model "claude-3-sonnet-20240229"
   @max_iterations 5
 
   def config do
     %{
-      api_key: System.get_env("CLAUDE_API_KEY")
+      api_key: System.get_env("CLAUDE_API_KEY"),
+      model: System.get_env("CLAUDE_MODEL") || @default_model
     }
   end
 
@@ -403,8 +404,10 @@ defmodule FinancialAdvisor.Services.AIAgent do
       Logger.error("CLAUDE_API_KEY not set")
       {:error, "API key not configured"}
     else
+      model = config().model
+      
       body = %{
-        model: @model,
+        model: model,
         max_tokens: 4096,
         system:
           "You are a helpful AI assistant for financial advisors. Use the provided tools to help users manage their contacts and schedule. Pay attention to date/time context provided in the system message.",
@@ -416,7 +419,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
              json: body,
              headers: [
                {"x-api-key", api_key},
-               {"anthropic-version", "2023-06-01"}
+               {"anthropic-version", "2023-06-01"},
+               {"content-type", "application/json"}
              ]
            ) do
         {:ok, %Req.Response{status: 200, body: response_body}} ->
@@ -426,8 +430,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
           end
 
         {:ok, %Req.Response{status: status, body: body}} ->
-          Logger.error("Claude API error: status=#{status}, body=#{inspect(body)}")
-          {:error, "API error: #{status}"}
+          Logger.error("Claude API error: status=#{status}, model=#{model}, body=#{inspect(body)}")
+          {:error, "API error: #{status} - Check if model '#{model}' is available in your API account"}
 
         {:error, reason} ->
           Logger.error("Claude API request failed: #{inspect(reason)}")
