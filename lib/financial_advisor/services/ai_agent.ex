@@ -126,6 +126,53 @@ defmodule FinancialAdvisor.Services.AIAgent do
         }
       },
       %{
+        name: "update_calendar_event",
+        description:
+          "Update an existing calendar event. You can find the event by title (and optionally by date) or by event_id. You can update the title, description, start_time, end_time, or attendees.",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            event_id: %{
+              type: "string",
+              description: "Google Calendar event ID (optional if title is provided)"
+            },
+            title: %{
+              type: "string",
+              description: "Event title to search for (optional if event_id is provided)"
+            },
+            date: %{
+              type: "string",
+              description:
+                "Date in YYYY-MM-DD format to narrow down search (optional, only used with title)"
+            },
+            new_title: %{
+              type: "string",
+              description: "New event title (optional)"
+            },
+            description: %{
+              type: "string",
+              description: "New event description (optional)"
+            },
+            start_time: %{
+              type: "string",
+              description:
+                "New start time in ISO8601 format (YYYY-MM-DDTHH:MM:SSZ) (optional)"
+            },
+            end_time: %{
+              type: "string",
+              description:
+                "New end time in ISO8601 format (YYYY-MM-DDTHH:MM:SSZ) (optional)"
+            },
+            attendees: %{
+              type: "array",
+              items: %{type: "string"},
+              description: "New list of attendee email addresses (optional)"
+            }
+          },
+          required: []
+        }
+      },
+      %{
         name: "create_hubspot_contact",
         description: "Create a new contact in HubSpot",
         input_schema: %{
@@ -651,6 +698,100 @@ defmodule FinancialAdvisor.Services.AIAgent do
     else
       {:error, reason} ->
         "Invalid datetime format: #{inspect(reason)}. Please use ISO8601 format (YYYY-MM-DDTHH:MM:SSZ)"
+    end
+  end
+
+  defp execute_tool(user, "update_calendar_event", params, _id, _conversation) do
+    # Find the event by event_id or title
+    event_result =
+      cond do
+        params["event_id"] && params["event_id"] != "" ->
+          CalendarService.find_event_by_google_id(user, params["event_id"])
+
+        params["title"] && params["title"] != "" ->
+          date =
+            if params["date"] do
+              case Date.from_iso8601(params["date"]) do
+                {:ok, date} -> date
+                _ -> nil
+              end
+            else
+              nil
+            end
+
+          CalendarService.find_event_by_title(user, params["title"], date)
+
+        true ->
+          {:error, "Either event_id or title must be provided to update an event"}
+      end
+
+    case event_result do
+      {:ok, event} ->
+        # Build update payload
+        updates = %{}
+
+        updates =
+          if params["new_title"] && params["new_title"] != "" do
+            Map.put(updates, "summary", params["new_title"])
+          else
+            updates
+          end
+
+        updates =
+          if params["description"] do
+            Map.put(updates, "description", params["description"])
+          else
+            updates
+          end
+
+        updates =
+          if params["start_time"] && params["start_time"] != "" do
+            case DateTime.from_iso8601(params["start_time"]) do
+              {:ok, start_dt, _} ->
+                Map.put(updates, "start", %{"dateTime" => DateTime.to_iso8601(start_dt)})
+
+              _ ->
+                updates
+            end
+          else
+            updates
+          end
+
+        updates =
+          if params["end_time"] && params["end_time"] != "" do
+            case DateTime.from_iso8601(params["end_time"]) do
+              {:ok, end_dt, _} ->
+                Map.put(updates, "end", %{"dateTime" => DateTime.to_iso8601(end_dt)})
+
+              _ ->
+                updates
+            end
+          else
+            updates
+          end
+
+        updates =
+          if params["attendees"] && is_list(params["attendees"]) do
+            Map.put(updates, "attendees", Enum.map(params["attendees"], &%{"email" => &1}))
+          else
+            updates
+          end
+
+        if map_size(updates) == 0 do
+          "No updates provided. Please specify at least one field to update (new_title, description, start_time, end_time, or attendees)."
+        else
+          case CalendarService.update_event(user, event.google_event_id, updates) do
+            {:ok, updated_event} ->
+              summary = updated_event["summary"] || event.title
+              "Calendar event updated successfully: #{summary}"
+
+            {:error, reason} ->
+              "Error updating calendar event: #{inspect(reason)}"
+          end
+        end
+
+      {:error, reason} ->
+        "Error finding calendar event: #{inspect(reason)}"
     end
   end
 

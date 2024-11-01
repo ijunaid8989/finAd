@@ -293,4 +293,42 @@ defmodule FinancialAdvisor.Services.CalendarService do
 
     {:ok, events}
   end
+
+  # Find event by title and optional date
+  def find_event_by_title(user, title, date \\ nil) do
+    query =
+      from(e in CalendarEvent,
+        where: e.user_id == ^user.id,
+        where: ilike(e.title, ^"%#{title}%"),
+        order_by: [desc: e.start_time],
+        limit: 10
+      )
+
+    query =
+      if date do
+        date_start = DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+        date_end = DateTime.add(date_start, 1, :day)
+
+        query
+        |> where([e], e.start_time >= ^date_start and e.start_time < ^date_end)
+      else
+        query
+      end
+
+    events = Repo.all(query)
+
+    case events do
+      [] -> {:error, "No event found with title containing '#{title}'"}
+      [event] -> {:ok, event}
+      events -> {:ok, List.first(events)}
+    end
+  end
+
+  # Find event by Google event ID
+  def find_event_by_google_id(user, google_event_id) do
+    case Repo.get_by(CalendarEvent, user_id: user.id, google_event_id: google_event_id) do
+      nil -> {:error, "Event not found with ID: #{google_event_id}"}
+      event -> {:ok, event}
+    end
+  end
 end
