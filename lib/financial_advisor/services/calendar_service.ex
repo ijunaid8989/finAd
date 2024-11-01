@@ -270,11 +270,35 @@ defmodule FinancialAdvisor.Services.CalendarService do
            body
          ) do
       {:ok, response_body} ->
-        response_body |> Jason.decode!() |> (&{:ok, &1}).()
+        updated_event_data = response_body |> Jason.decode!()
+
+        # Also update the local database to keep it in sync
+        update_local_event(user, event_id, updated_event_data)
+
+        {:ok, updated_event_data}
 
       {:error, reason} ->
         Logger.error("Failed to update calendar event: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  # Update local database event after Google Calendar update
+  defp update_local_event(user, google_event_id, event_data) do
+    case Repo.get_by(CalendarEvent, user_id: user.id, google_event_id: google_event_id) do
+      nil ->
+        # Event not in local DB yet, store it
+        parsed = parse_event(event_data)
+        CalendarEvent.changeset(%CalendarEvent{}, Map.merge(parsed, %{user_id: user.id}))
+        |> Repo.insert(on_conflict: :nothing)
+
+      existing_event ->
+        # Update existing local event
+        parsed = parse_event(event_data)
+
+        existing_event
+        |> CalendarEvent.changeset(parsed)
+        |> Repo.update()
     end
   end
 
