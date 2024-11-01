@@ -16,7 +16,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
   import Ecto.Query
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
-  @default_model "claude-sonnet-4-5"
+  @default_model "claude-sonnet-4-5-20250929"
   @max_iterations 5
 
   def config do
