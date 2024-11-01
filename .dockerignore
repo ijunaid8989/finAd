@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+AGENTS.md
+*.md
+
+# Development files
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+_build/
+deps/
+*.beam
+*.ez
+
+# Test files
+test/
+*.test.exs
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+*.tmp
+
+# Coverage
+cover/
+
+# Assets (will be built in Docker)
+priv/static/assets/
+

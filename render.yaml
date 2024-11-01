@@ -1,0 +1,55 @@
+services:
+  # Web Service
+  - type: web
+    name: financial-advisor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    region: oregon
+    envVars:
+      - key: PHX_SERVER
+        value: true
+      - key: PORT
+        value: 8080
+      - key: MIX_ENV
+        value: prod
+      - key: SECRET_KEY_BASE
+        sync: false
+      - key: PHX_HOST
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: financial-advisor-db
+          property: connectionString
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: HUBSPOT_CLIENT_ID
+        sync: false
+      - key: HUBSPOT_CLIENT_SECRET
+        sync: false
+      - key: HUBSPOT_REDIRECT_URI
+        sync: false
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: POOL_SIZE
+        value: 10
+    healthCheckPath: /
+    dockerCommand: ./bin/server
+
+databases:
+  # PostgreSQL Database with pgvector
+  - name: financial-advisor-db
+    databaseName: financial_advisor
+    user: financial_advisor
+    plan: starter
+    region: oregon
+    postgresMajorVersion: 15
+    # Note: Render supports pgvector extension
+    # You'll need to enable it after database creation via:
+    # CREATE EXTENSION IF NOT EXISTS vector;
+

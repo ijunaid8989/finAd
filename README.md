@@ -181,7 +181,7 @@ A sophisticated Elixir/Phoenix application that orchestrates Gmail, Google Calen
 - **External APIs**: Google APIs (Gmail, Calendar), HubSpot, Claude AI
 - **Authentication**: OAuth2
 - **Background Jobs**: GenServer-based scheduling
-- **HTTP Client**: HTTPoison
+- **HTTP Client**: HTTPoison (Note: Project guidelines recommend migrating to Req)
 - **JSON**: Jason
 - **Search**: Vector embeddings with cosine similarity
 
@@ -210,6 +210,100 @@ DATABASE_URL=postgresql://user:password@localhost/financial_advisor_dev
 SECRET_KEY_BASE=generated_secret
 PHX_HOST=yourdomain.com
 ```
+
+---
+
+## 🚀 Deployment to Render
+
+### Prerequisites
+- [Render Account](https://render.com) - Sign up for free
+- GitHub/GitLab repository with your code
+- PostgreSQL database with pgvector extension (Render supports this)
+
+### Quick Start (Using render.yaml)
+
+1. **Connect Repository to Render:**
+   - Go to [Render Dashboard](https://dashboard.render.com)
+   - Click "New +" → "Blueprint"
+   - Connect your GitHub/GitLab repository
+   - Render will automatically detect `render.yaml` and create all services
+
+2. **Set Environment Variables:**
+   - Go to your web service settings → "Environment"
+   - Add the following (see full list below):
+     - `SECRET_KEY_BASE` - Generate with: `mix phx.gen.secret`
+     - `PHX_HOST` - Your Render URL (e.g., `financial-advisor.onrender.com`)
+     - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
+     - `HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET`, `HUBSPOT_REDIRECT_URI`
+     - `CLAUDE_API_KEY`
+
+3. **Enable pgvector Extension:**
+   - Go to your database service → "Connect" → "Connect via psql"
+   - Run: `CREATE EXTENSION IF NOT EXISTS vector;`
+
+4. **Deploy:**
+   - Render automatically deploys on git push
+   - Or manually trigger from dashboard
+
+### Manual Setup
+
+1. **Create PostgreSQL Database:**
+   - Render Dashboard → "New +" → "PostgreSQL"
+   - Name: `financial-advisor-db`
+   - PostgreSQL Version: 15
+   - Enable pgvector: `CREATE EXTENSION IF NOT EXISTS vector;`
+
+2. **Create Web Service:**
+   - Render Dashboard → "New +" → "Web Service"
+   - Connect repository
+   - Environment: `Docker`
+   - Dockerfile Path: `Dockerfile`
+   - Link the database (auto-sets `DATABASE_URL`)
+
+3. **Set Environment Variables:**
+   - `PHX_SERVER=true`
+   - `PORT=8080`
+   - `MIX_ENV=prod`
+   - Plus all OAuth and API keys (see full list in DEPLOYMENT.md)
+
+4. **Run Migrations:**
+   - After first deploy, go to web service → "Shell"
+   - Run: `./bin/migrate`
+
+### Required Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `SECRET_KEY_BASE` | Phoenix secret | Generate: `mix phx.gen.secret` |
+| `PHX_HOST` | Your app hostname | `financial-advisor.onrender.com` |
+| `DATABASE_URL` | PostgreSQL URL | Auto-set when linking database |
+| `GOOGLE_CLIENT_ID` | Google OAuth ID | From Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth secret | From Google Cloud Console |
+| `GOOGLE_REDIRECT_URI` | Google redirect | `https://your-app.onrender.com/oauth/google/callback` |
+| `HUBSPOT_CLIENT_ID` | HubSpot OAuth ID | From HubSpot Developer Portal |
+| `HUBSPOT_CLIENT_SECRET` | HubSpot OAuth secret | From HubSpot Developer Portal |
+| `HUBSPOT_REDIRECT_URI` | HubSpot redirect | `https://your-app.onrender.com/oauth/hubspot/callback` |
+| `CLAUDE_API_KEY` | Claude AI API key | From Anthropic |
+
+### Post-Deployment
+
+1. **Update OAuth Redirect URIs:**
+   - Google: `https://your-app.onrender.com/oauth/google/callback`
+   - HubSpot: `https://your-app.onrender.com/oauth/hubspot/callback`
+
+2. **Verify Deployment:**
+   - Visit your Render URL
+   - Check logs in Render dashboard
+   - Verify pgvector: Connect to DB and run `\dx`
+
+### Troubleshooting
+
+- **Check Logs:** Render Dashboard → Your Service → "Logs"
+- **Database Connection:** Verify `DATABASE_URL` is set
+- **pgvector Issues:** Run `CREATE EXTENSION IF NOT EXISTS vector;` in database shell
+- **Build Failures:** Check Dockerfile and build logs
+
+For detailed deployment instructions, see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ---
 

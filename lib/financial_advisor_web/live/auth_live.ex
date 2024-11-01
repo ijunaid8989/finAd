@@ -2,8 +2,14 @@ defmodule FinancialAdvisorWeb.AuthLive do
   use FinancialAdvisorWeb, :live_view
   alias FinancialAdvisor.OAuth.{GoogleOAuth, HubspotOAuth, StateManager}
 
-  def mount(_params, _session, socket) do
-    {:ok, socket}
+  def mount(_params, session, socket) do
+    user = session["current_user"]
+
+    if user do
+      {:ok, redirect(socket, to: ~p"/chat")}
+    else
+      {:ok, socket}
+    end
   end
 
   def render(assigns) do

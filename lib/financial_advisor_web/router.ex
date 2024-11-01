@@ -17,6 +17,7 @@ defmodule FinancialAdvisorWeb.Router do
   scope "/", FinancialAdvisorWeb do
     pipe_through :browser
 
+    get "/", PageController, :home
     live "/login", AuthLive
     live "/chat", ChatLive
     live "/chat/:id", ChatLive

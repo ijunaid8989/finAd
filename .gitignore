@@ -37,3 +37,6 @@ npm-debug.log
 
 .env
 
+# macOS
+.DS_Store
+
