@@ -23,7 +23,14 @@ defmodule FinancialAdvisorWeb.ChatLive do
           |> Repo.insert!()
         end
 
-      # Ensure conversation is saved before allowing input
+      # If we created a new conversation and we're not already on its URL, redirect
+      socket =
+        if is_nil(conversation_id) or params["id"] != "#{conversation.id}" do
+          redirect(socket, to: ~p"/chat/#{conversation.id}")
+        else
+          socket
+        end
+
       {:ok,
        socket
        |> assign(
@@ -33,8 +40,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
          messages: conversation.messages || [],
          loading: false,
          chat_task: nil
-       )
-       |> push_patch(to: ~p"/chat/#{conversation.id}")}
+       )}
     end
   end
 
