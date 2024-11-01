@@ -4,7 +4,6 @@ defmodule FinancialAdvisor.Services.AIAgent do
   alias FinancialAdvisor.Conversation
   alias FinancialAdvisor.OngoingInstruction
   alias FinancialAdvisor.Email
-  alias FinancialAdvisor.HubspotContact
 
   alias FinancialAdvisor.Services.{
     RAGService,
@@ -433,7 +432,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
     |> Repo.all()
   end
 
-  defp call_claude(user, messages) do
+  defp call_claude(_user, messages) do
     api_key = config().api_key
 
     unless api_key do

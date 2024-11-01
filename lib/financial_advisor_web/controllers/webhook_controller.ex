@@ -56,6 +56,7 @@ defmodule FinancialAdvisorWeb.WebhookController do
     # TODO: Implement webhook signature verification
     # For production, verify the X-HubSpot-Request-Signature header
     # using your webhook signing secret
+    # This function handles verification for all providers (gmail, hubspot, calendar)
     true
   end
 
@@ -74,10 +75,5 @@ defmodule FinancialAdvisorWeb.WebhookController do
       false ->
         send_resp(conn, 401, "Unauthorized")
     end
-  end
-
-  defp verify_webhook_signature(_conn, _provider) do
-    # TODO: Implement webhook signature verification based on provider
-    true
   end
 end
