@@ -79,8 +79,7 @@ defmodule FinancialAdvisor.Services.HubspotService do
         }
       })
 
-    case make_request(:post, "#{@hubspot_api_url}/crm/v3/objects/contacts", user, body)
-         |> IO.inspect() do
+    case make_request(:post, "#{@hubspot_api_url}/crm/v3/objects/contacts", user, body) do
       {:ok, response_body} ->
         {:ok, Jason.decode!(response_body)}
 
@@ -107,17 +106,44 @@ defmodule FinancialAdvisor.Services.HubspotService do
   end
 
   def add_note_to_contact(user, contact_id, note_text) do
+    # HubSpot engagements API for adding notes
     body =
       Jason.encode!(%{
-        engagement: %{active: true, type: "NOTE"},
-        associations: %{contactIds: [contact_id]},
+        engagement: %{
+          active: true,
+          type: "NOTE",
+          timestamp: DateTime.utc_now() |> DateTime.to_unix(:millisecond)
+        },
+        associations: %{
+          contactIds: [contact_id]
+        },
         attachments: [],
-        metadata: %{body: note_text}
+        metadata: %{
+          body: note_text
+        }
       })
 
-    case make_request(:post, "#{@hubspot_api_url}/crm/v3/objects/notes", user, body) do
+    case make_request(:post, "#{@hubspot_api_url}/engagements/v1/engagements", user, body) do
       {:ok, response_body} ->
-        {:ok, Jason.decode!(response_body)}
+        decoded = Jason.decode!(response_body)
+        Logger.info("Note added to contact #{contact_id}: #{String.slice(note_text, 0, 50)}...")
+        {:ok, decoded}
+
+      {:error, reason} ->
+        Logger.error("Failed to add note to contact #{contact_id}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  # Helper function to add note by email (more user-friendly)
+  def add_note_by_email(user, email, note_text) do
+    case search_contacts(user, email) do
+      {:ok, []} ->
+        {:error, "Contact not found with email: #{email}"}
+
+      {:ok, [contact | _]} ->
+        contact_id = contact["id"]
+        add_note_to_contact(user, contact_id, note_text)
 
       {:error, reason} ->
         {:error, reason}
@@ -172,7 +198,6 @@ defmodule FinancialAdvisor.Services.HubspotService do
     user
     |> Ecto.Changeset.change(hubspot_access_token: new_token)
     |> Ecto.Changeset.change(hubspot_refresh_token: refresh_token)
-    |> IO.inspect()
     |> Repo.update()
   end
 

@@ -153,20 +153,25 @@ defmodule FinancialAdvisor.Services.AIAgent do
       },
       %{
         name: "add_contact_note",
-        description: "Add a note to a HubSpot contact",
+        description:
+          "Add a note to a HubSpot contact. You can use either contact_id (HubSpot ID) or email address to identify the contact. If email is provided, the system will find the contact automatically.",
         input_schema: %{
           type: "object",
           properties: %{
             contact_id: %{
               type: "string",
-              description: "HubSpot contact ID"
+              description: "HubSpot contact ID (optional if email is provided)"
+            },
+            email: %{
+              type: "string",
+              description: "Contact email address (optional if contact_id is provided)"
             },
             note: %{
               type: "string",
-              description: "Note content"
+              description: "Note content to add to the contact"
             }
           },
-          required: ["contact_id", "note"]
+          required: ["note"]
         }
       },
       %{
@@ -669,16 +674,40 @@ defmodule FinancialAdvisor.Services.AIAgent do
   defp execute_tool(
          user,
          "add_contact_note",
-         %{"contact_id" => contact_id, "note" => note},
+         params,
          _id,
          _conversation
        ) do
-    case HubspotService.add_note_to_contact(user, contact_id, note) do
-      {:ok, _} ->
-        "Note added successfully to contact #{contact_id}"
+    note = params["note"]
+    contact_id = Map.get(params, "contact_id")
+    email = Map.get(params, "email")
 
-      {:error, reason} ->
-        "Error adding note to contact: #{inspect(reason)}"
+    cond do
+      # If email is provided, use the email-based function
+      email && email != "" ->
+        case HubspotService.add_note_by_email(user, email, note) do
+          {:ok, result} ->
+            note_id = result["engagement"] && result["engagement"]["id"] || "unknown"
+            "Note added successfully to contact with email #{email} (Note ID: #{note_id})"
+
+          {:error, reason} ->
+            "Error adding note to contact with email #{email}: #{inspect(reason)}"
+        end
+
+      # If contact_id is provided, use it directly
+      contact_id && contact_id != "" ->
+        case HubspotService.add_note_to_contact(user, contact_id, note) do
+          {:ok, result} ->
+            note_id = result["engagement"] && result["engagement"]["id"] || "unknown"
+            "Note added successfully to contact #{contact_id} (Note ID: #{note_id})"
+
+          {:error, reason} ->
+            "Error adding note to contact #{contact_id}: #{inspect(reason)}"
+        end
+
+      # Neither provided
+      true ->
+        "Error: Either contact_id or email must be provided to add a note"
     end
   end
 
