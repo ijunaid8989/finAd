@@ -16,7 +16,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
   import Ecto.Query
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
-  @default_model "claude-3-sonnet-20240229"
+  @default_model "claude-sonnet-4-5"
   @max_iterations 5
 
   def config do
@@ -405,7 +405,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
       {:error, "API key not configured"}
     else
       model = config().model
-      
+
       body = %{
         model: model,
         max_tokens: 4096,
