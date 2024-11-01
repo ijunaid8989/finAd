@@ -213,20 +213,68 @@ defmodule FinancialAdvisorWeb.ChatLive do
 
   def handle_event("sync_emails", _params, socket) do
     user = socket.assigns.user
-    Task.start_link(fn -> FinancialAdvisor.Services.GmailService.sync_emails(user, 100) end)
-    {:noreply, socket |> put_flash(:info, "Syncing emails...")}
+
+    if user.google_access_token do
+      Task.async(fn ->
+        case FinancialAdvisor.Services.GmailService.sync_emails(user, 100) do
+          count when is_integer(count) ->
+            send(self(), {:sync_complete, :emails, {:ok, "Synced #{count} emails"}})
+
+          {:error, reason} ->
+            send(self(), {:sync_complete, :emails, {:error, "Failed to sync: #{inspect(reason)}"}})
+        end
+      end)
+
+      {:noreply, socket |> put_flash(:info, "Syncing emails...")}
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Please connect your Google account in Settings first")}
+    end
   end
 
   def handle_event("sync_calendar", _params, socket) do
     user = socket.assigns.user
-    Task.start_link(fn -> FinancialAdvisor.Services.CalendarService.sync_events(user) end)
-    {:noreply, socket |> put_flash(:info, "Syncing calendar...")}
+
+    if user.google_access_token do
+      Task.async(fn ->
+        case FinancialAdvisor.Services.CalendarService.sync_events(user) do
+          count when is_integer(count) ->
+            send(self(), {:sync_complete, :calendar, {:ok, "Synced #{count} calendar events"}})
+
+          {:error, reason} ->
+            send(self(), {:sync_complete, :calendar, {:error, "Failed to sync: #{inspect(reason)}"}})
+        end
+      end)
+
+      {:noreply, socket |> put_flash(:info, "Syncing calendar...")}
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Please connect your Google account in Settings first")}
+    end
   end
 
   def handle_event("sync_contacts", _params, socket) do
     user = socket.assigns.user
-    Task.start_link(fn -> FinancialAdvisor.Services.HubspotService.sync_contacts(user, 100) end)
-    {:noreply, socket |> put_flash(:info, "Syncing contacts...")}
+
+    if user.hubspot_access_token do
+      Task.async(fn ->
+        case FinancialAdvisor.Services.HubspotService.sync_contacts(user, 100) do
+          count when is_integer(count) ->
+            send(self(), {:sync_complete, :contacts, {:ok, "Synced #{count} contacts"}})
+
+          {:error, reason} ->
+            send(self(), {:sync_complete, :contacts, {:error, "Failed to sync: #{inspect(reason)}"}})
+        end
+      end)
+
+      {:noreply, socket |> put_flash(:info, "Syncing contacts...")}
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Please connect your HubSpot account in Settings first")}
+    end
   end
 
   defp stream_response(socket, user_message) do
@@ -272,6 +320,31 @@ defmodule FinancialAdvisorWeb.ChatLive do
 
     socket
     |> assign(chat_task: task.ref)
+  end
+
+  # Handle sync completion messages
+  def handle_info({:sync_complete, :emails, {:ok, message}}, socket) do
+    {:noreply, socket |> put_flash(:info, message)}
+  end
+
+  def handle_info({:sync_complete, :emails, {:error, message}}, socket) do
+    {:noreply, socket |> put_flash(:error, message)}
+  end
+
+  def handle_info({:sync_complete, :calendar, {:ok, message}}, socket) do
+    {:noreply, socket |> put_flash(:info, message)}
+  end
+
+  def handle_info({:sync_complete, :calendar, {:error, message}}, socket) do
+    {:noreply, socket |> put_flash(:error, message)}
+  end
+
+  def handle_info({:sync_complete, :contacts, {:ok, message}}, socket) do
+    {:noreply, socket |> put_flash(:info, message)}
+  end
+
+  def handle_info({:sync_complete, :contacts, {:error, message}}, socket) do
+    {:noreply, socket |> put_flash(:error, message)}
   end
 
   def handle_info({ref, result}, socket) when is_reference(ref) do
