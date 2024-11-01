@@ -343,15 +343,15 @@ defmodule FinancialAdvisor.Services.AIAgent do
     previous_messages =
       Enum.map(conversation.messages || [], fn msg ->
         %{
-          role: msg["role"],
-          content: normalize_message_content(msg["content"])
+          "role" => msg["role"],
+          "content" => normalize_message_content(msg["content"])
         }
       end)
 
     [
-      %{role: "user", content: system_prompt}
+      %{"role" => "user", "content" => system_prompt}
       | previous_messages
-    ] ++ [%{role: "user", content: user_message}]
+    ] ++ [%{"role" => "user", "content" => user_message}]
   end
 
   defp normalize_message_content(content) when is_binary(content), do: content
@@ -457,25 +457,28 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
   defp build_assistant_message_with_tools(content) do
     %{
-      role: "assistant",
-      content: content
+      "role" => "assistant",
+      "content" => content
     }
   end
 
   defp build_tool_results_message(tool_calls, tool_results) do
     tool_result_blocks =
       Enum.zip(tool_calls, tool_results)
-      |> Enum.map(fn {{_name, _input, id}, result} ->
+      |> Enum.map(fn {{_name, _input, tool_id}, {_result_id, result}} ->
+        # Ensure result is a string
+        content = if(is_binary(result), do: result, else: Jason.encode!(result))
+        
         %{
-          type: "tool_result",
-          tool_use_id: id,
-          content: if(is_binary(result), do: result, else: Jason.encode!(result))
+          "type" => "tool_result",
+          "tool_use_id" => tool_id,
+          "content" => content
         }
       end)
 
     %{
-      role: "user",
-      content: tool_result_blocks
+      "role" => "user",
+      "content" => tool_result_blocks
     }
   end
 
@@ -495,7 +498,6 @@ defmodule FinancialAdvisor.Services.AIAgent do
           {id, "Tool execution failed: #{inspect(reason)}"}
       end
     end)
-    |> Enum.map(fn {_id, result} -> result end)
   end
 
   defp execute_tool(user, "search_emails", %{"query" => query}, _id, _conversation) do
