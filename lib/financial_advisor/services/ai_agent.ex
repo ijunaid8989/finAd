@@ -3,6 +3,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
   alias FinancialAdvisor.Repo
   alias FinancialAdvisor.Conversation
   alias FinancialAdvisor.OngoingInstruction
+  alias FinancialAdvisor.Email
+  alias FinancialAdvisor.HubspotContact
 
   alias FinancialAdvisor.Services.{
     RAGService,
@@ -15,6 +17,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
   @model "claude-3-5-sonnet-20241022"
+  @max_iterations 5
 
   def config do
     %{
@@ -26,7 +29,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
     [
       %{
         name: "search_emails",
-        description: "Search through user emails for specific information",
+        description: "Search through user emails for specific information using semantic search",
         input_schema: %{
           type: "object",
           properties: %{
@@ -54,7 +57,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
       },
       %{
         name: "get_calendar_availability",
-        description: "Get available time slots in the user's calendar",
+        description: "Get available time slots and existing events in the user's calendar",
         input_schema: %{
           type: "object",
           properties: %{
@@ -68,7 +71,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
       },
       %{
         name: "send_email",
-        description: "Send an email to a recipient",
+        description: "Send an email to a recipient via Gmail",
         input_schema: %{
           type: "object",
           properties: %{
@@ -179,7 +182,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
             trigger_type: %{
               type: "string",
               description:
-                "When to trigger this instruction (e.g., 'email_received', 'contact_created')"
+                "When to trigger this instruction (e.g., 'email_received', 'contact_created', 'manual')"
             }
           },
           required: ["instruction", "trigger_type"]
@@ -196,7 +199,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
       },
       %{
         name: "get_contact_context",
-        description: "Get detailed context about a contact including recent emails and notes",
+        description:
+          "Get detailed context about a contact including recent emails exchanged and HubSpot notes",
         input_schema: %{
           type: "object",
           properties: %{
@@ -217,8 +221,56 @@ defmodule FinancialAdvisor.Services.AIAgent do
     with {:ok, rag_context} <- RAGService.get_context_for_query(user.id, message),
          instructions <- get_active_instructions(user.id),
          messages <- build_message_history(conversation, message, rag_context, instructions) do
-      call_claude(user, messages, conversation)
+      # Main chat loop with tool calling support
+      chat_with_tools(user, messages, conversation, 0)
+    else
+      {:error, reason} ->
+        Logger.error("Failed to prepare chat: #{inspect(reason)}")
+        {:error, reason}
     end
+  end
+
+  # Main chat loop that handles tool calling iteratively
+  defp chat_with_tools(user, messages, conversation, iteration) when iteration < @max_iterations do
+    case call_claude(user, messages) do
+      {:ok, response_data} ->
+        content = response_data["content"] || []
+        {tool_calls, text_response} = process_content_blocks(content)
+
+        # If there are tool calls, execute them and continue the conversation
+        if tool_calls != [] do
+          tool_results = execute_tools(user, tool_calls, conversation)
+
+          # Add assistant message with tool calls to conversation
+          assistant_message = build_assistant_message_with_tools(content)
+
+          # Add tool results as user message (Claude expects this format)
+          tool_results_message = build_tool_results_message(tool_calls, tool_results)
+
+          # Continue the conversation with tool results
+          updated_messages = messages ++ [assistant_message, tool_results_message]
+
+          # Recursively call Claude again with tool results
+          chat_with_tools(user, updated_messages, conversation, iteration + 1)
+        else
+          # No tool calls, final response
+          final_response = text_response || "I'm here to help!"
+
+          # Save final response to conversation
+          save_message_to_conversation(conversation, "assistant", final_response)
+
+          {:ok, final_response}
+        end
+
+      {:error, reason} ->
+        Logger.error("Claude API error: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp chat_with_tools(_user, _messages, _conversation, iteration) when iteration >= @max_iterations do
+    Logger.warning("Max iterations reached in tool calling loop")
+    {:error, "Maximum tool calling iterations reached"}
   end
 
   defp get_or_create_conversation(user, nil) do
@@ -231,12 +283,9 @@ defmodule FinancialAdvisor.Services.AIAgent do
   end
 
   defp build_message_history(conversation, user_message, rag_context, instructions) do
-    # Get current date/time information for Claude
     now = DateTime.utc_now()
     current_date = DateTime.to_date(now)
     current_day_name = Calendar.strftime(now, "%A")
-
-    # Calculate all weekdays for reference
     dates_map = calculate_weekday_dates(current_date)
 
     system_prompt = """
@@ -294,76 +343,50 @@ defmodule FinancialAdvisor.Services.AIAgent do
       Enum.map(conversation.messages || [], fn msg ->
         %{
           role: msg["role"],
-          content: msg["content"]
+          content: normalize_message_content(msg["content"])
         }
       end)
 
-    (previous_messages ++
-       [
-         %{
-           role: "user",
-           content: user_message
-         }
-       ])
-    |> (&([%{role: "user", content: system_prompt}] ++ &1)).()
+    [
+      %{role: "user", content: system_prompt}
+      | previous_messages
+    ] ++ [%{role: "user", content: user_message}]
   end
 
+  defp normalize_message_content(content) when is_binary(content), do: content
+  defp normalize_message_content(content) when is_list(content), do: content
+  defp normalize_message_content(_), do: ""
+
   defp format_instructions(instructions) do
-    instructions
-    |> Enum.map(&"- #{&1.instruction} (Trigger: #{&1.trigger_type})")
-    |> Enum.join("\n")
+    if Enum.empty?(instructions) do
+      "No active ongoing instructions."
+    else
+      instructions
+      |> Enum.map(&"- #{&1.instruction} (Trigger: #{&1.trigger_type})")
+      |> Enum.join("\n")
+    end
   end
 
   defp calculate_weekday_dates(reference_date) do
     current_day = Date.day_of_week(reference_date)
 
-    # Calculate days until each weekday (1=Monday, 7=Sunday)
-    days_map = %{
-      1 =>
-        if(current_day > 1,
-          do: 8 - current_day + 1,
-          else: if(current_day == 1, do: 7, else: 1 - current_day)
-        ),
-      2 =>
-        if(current_day > 2,
-          do: 9 - current_day,
-          else: if(current_day == 2, do: 7, else: 2 - current_day)
-        ),
-      3 =>
-        if(current_day > 3,
-          do: 10 - current_day,
-          else: if(current_day == 3, do: 7, else: 3 - current_day)
-        ),
-      4 =>
-        if(current_day > 4,
-          do: 11 - current_day,
-          else: if(current_day == 4, do: 7, else: 4 - current_day)
-        ),
-      5 =>
-        if(current_day > 5,
-          do: 12 - current_day,
-          else: if(current_day == 5, do: 7, else: 5 - current_day)
-        ),
-      6 =>
-        if(current_day > 6,
-          do: 13 - current_day,
-          else: if(current_day == 6, do: 7, else: 6 - current_day)
-        ),
-      7 =>
-        if(current_day > 7,
-          do: 14 - current_day,
-          else: if(current_day == 7, do: 7, else: 7 - current_day)
-        )
-    }
+    # Calculate days until next occurrence of each weekday
+    days_until = fn target_day ->
+      if current_day < target_day do
+        target_day - current_day
+      else
+        7 - current_day + target_day
+      end
+    end
 
     %{
-      monday: Date.add(reference_date, Map.get(days_map, 1)),
-      tuesday: Date.add(reference_date, Map.get(days_map, 2)),
-      wednesday: Date.add(reference_date, Map.get(days_map, 3)),
-      thursday: Date.add(reference_date, Map.get(days_map, 4)),
-      friday: Date.add(reference_date, Map.get(days_map, 5)),
-      saturday: Date.add(reference_date, Map.get(days_map, 6)),
-      sunday: Date.add(reference_date, Map.get(days_map, 7))
+      monday: Date.add(reference_date, days_until.(1)),
+      tuesday: Date.add(reference_date, days_until.(2)),
+      wednesday: Date.add(reference_date, days_until.(3)),
+      thursday: Date.add(reference_date, days_until.(4)),
+      friday: Date.add(reference_date, days_until.(5)),
+      saturday: Date.add(reference_date, days_until.(6)),
+      sunday: Date.add(reference_date, days_until.(7))
     }
   end
 
@@ -373,70 +396,51 @@ defmodule FinancialAdvisor.Services.AIAgent do
     |> Repo.all()
   end
 
-  defp call_claude(user, messages, conversation) do
-    headers = [
-      {"Content-Type", "application/json"},
-      {"x-api-key", config().api_key},
-      {"anthropic-version", "2023-06-01"}
-    ]
+  defp call_claude(user, messages) do
+    api_key = config().api_key
 
-    body =
-      Jason.encode!(%{
+    unless api_key do
+      Logger.error("CLAUDE_API_KEY not set")
+      {:error, "API key not configured"}
+    else
+      body = %{
         model: @model,
-        max_tokens: 2048,
+        max_tokens: 4096,
         system:
-          "You are a helpful AI assistant for financial advisors. Use the provided tools to help users manage their contacts and schedule. Pay attention to date/time context provided by the system.",
+          "You are a helpful AI assistant for financial advisors. Use the provided tools to help users manage their contacts and schedule. Pay attention to date/time context provided in the system message.",
         messages: messages,
         tools: available_tools()
-      })
+      }
 
-    case HTTPoison.post(@claude_api_url, body, headers) do
-      {:ok, response} ->
-        handle_claude_response(user, response, conversation, messages)
+      case Req.post(@claude_api_url,
+             json: body,
+             headers: [
+               {"x-api-key", api_key},
+               {"anthropic-version", "2023-06-01"}
+             ]
+           ) do
+        {:ok, %Req.Response{status: 200, body: response_body}} ->
+          case Jason.decode(response_body) do
+            {:ok, data} -> {:ok, data}
+            {:error, reason} -> {:error, "Failed to parse response: #{inspect(reason)}"}
+          end
 
-      {:error, reason} ->
-        Logger.error("Claude API error: #{inspect(reason)}")
-        {:error, reason}
+        {:ok, %Req.Response{status: status, body: body}} ->
+          Logger.error("Claude API error: status=#{status}, body=#{inspect(body)}")
+          {:error, "API error: #{status}"}
+
+        {:error, reason} ->
+          Logger.error("Claude API request failed: #{inspect(reason)}")
+          {:error, reason}
+      end
     end
   end
 
-  defp handle_claude_response(user, response, conversation, _messages) do
-    case Jason.decode(response.body) do
-      {:ok, data} ->
-        content = data["content"] || []
-
-        {tool_calls, text_response} = process_content_blocks(content, user)
-
-        # Store message in conversation
-        updated_messages = [
-          %{role: "assistant", content: text_response}
-        ]
-
-        conversation
-        |> Conversation.changeset(%{
-          messages: (conversation.messages || []) ++ updated_messages
-        })
-        |> Repo.update()
-
-        # If there were tool calls, execute them
-        if tool_calls != [] do
-          results = execute_tools(user, tool_calls, conversation)
-          {:ok, text_response, results}
-        else
-          {:ok, text_response}
-        end
-
-      {:error, reason} ->
-        Logger.error("Failed to parse Claude response: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
-  defp process_content_blocks(content, _user) do
+  defp process_content_blocks(content) do
     Enum.reduce(content, {[], ""}, fn block, {tool_calls, text} ->
       case block do
         %{"type" => "text", "text" => text_content} ->
-          {tool_calls, text <> text_content}
+          {tool_calls, if(text == "", do: text_content, else: text <> "\n" <> text_content)}
 
         %{"type" => "tool_use", "name" => name, "input" => input, "id" => id} ->
           {tool_calls ++ [{name, input, id}], text}
@@ -447,17 +451,62 @@ defmodule FinancialAdvisor.Services.AIAgent do
     end)
   end
 
+  defp build_assistant_message_with_tools(content) do
+    %{
+      role: "assistant",
+      content: content
+    }
+  end
+
+  defp build_tool_results_message(tool_calls, tool_results) do
+    tool_result_blocks =
+      Enum.zip(tool_calls, tool_results)
+      |> Enum.map(fn {{_name, _input, id}, result} ->
+        %{
+          type: "tool_result",
+          tool_use_id: id,
+          content: if(is_binary(result), do: result, else: Jason.encode!(result))
+        }
+      end)
+
+    %{
+      role: "user",
+      content: tool_result_blocks
+    }
+  end
+
   defp execute_tools(user, tool_calls, conversation) do
     tool_calls
     |> Enum.map(fn {name, input, id} ->
-      execute_tool(user, name, input, id, conversation)
+      try do
+        result = execute_tool(user, name, input, id, conversation)
+        {id, result}
+      rescue
+        e ->
+          Logger.error("Tool execution error: #{inspect(e)}")
+          {id, "Error executing tool: #{Exception.message(e)}"}
+      catch
+        :exit, reason ->
+          Logger.error("Tool execution exit: #{inspect(reason)}")
+          {id, "Tool execution failed: #{inspect(reason)}"}
+      end
     end)
+    |> Enum.map(fn {_id, result} -> result end)
   end
 
   defp execute_tool(user, "search_emails", %{"query" => query}, _id, _conversation) do
     case RAGService.search_emails(user.id, query) do
       {:ok, results} ->
-        format_search_results(results)
+        if Enum.empty?(results) do
+          "No emails found matching your query."
+        else
+          results
+          |> Enum.take(5)
+          |> Enum.map(fn %{email: email, similarity: similarity} ->
+            "From: #{email.from || "Unknown"}, Subject: #{email.subject || "No subject"}, Date: #{format_date(email.received_at)}, Relevance: #{Float.round(similarity * 100, 1)}%"
+          end)
+          |> Enum.join("\n")
+        end
 
       {:error, reason} ->
         "Error searching emails: #{inspect(reason)}"
@@ -467,7 +516,20 @@ defmodule FinancialAdvisor.Services.AIAgent do
   defp execute_tool(user, "search_contacts", %{"query" => query}, _id, _conversation) do
     case HubspotService.search_contacts(user, query) do
       {:ok, results} ->
-        format_contact_results(results)
+        if Enum.empty?(results) do
+          "No contacts found matching your query."
+        else
+          results
+          |> Enum.take(10)
+          |> Enum.map(fn contact ->
+            props = contact["properties"] || %{}
+            name = "#{props["firstname"] || ""} #{props["lastname"] || ""}" |> String.trim()
+            email = props["email"] || "No email"
+            phone = props["phone"] || "No phone"
+            "Name: #{name}, Email: #{email}, Phone: #{phone}"
+          end)
+          |> Enum.join("\n")
+        end
 
       {:error, reason} ->
         "Error searching contacts: #{inspect(reason)}"
@@ -477,12 +539,25 @@ defmodule FinancialAdvisor.Services.AIAgent do
   defp execute_tool(user, "get_calendar_availability", params, _id, _conversation) do
     days = Map.get(params, "days_ahead", 7)
 
-    case CalendarService.sync_events(user) do
-      count when is_integer(count) ->
-        "Found #{count} calendar events in the next #{days} days"
+    case CalendarService.get_upcoming_events(user, days) do
+      {:ok, events} ->
+        if Enum.empty?(events) do
+          "No calendar events found in the next #{days} days."
+        else
+          event_list =
+            events
+            |> Enum.take(10)
+            |> Enum.map(fn event ->
+              start_time = format_datetime(event.start_time)
+              "Event: #{event.title || "Untitled"} on #{start_time}"
+            end)
+            |> Enum.join("\n")
+
+          "Found #{length(events)} calendar events in the next #{days} days:\n#{event_list}"
+        end
 
       {:error, reason} ->
-        "Error getting calendar: #{inspect(reason)}"
+        "Error getting calendar availability: #{inspect(reason)}"
     end
   end
 
@@ -495,7 +570,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
        ) do
     case GmailService.send_email(user, to, subject, body) do
       {:ok, _} ->
-        "Email sent successfully to #{to}"
+        "Email sent successfully to #{to} with subject: #{subject}"
 
       {:error, reason} ->
         "Error sending email: #{inspect(reason)}"
@@ -505,23 +580,30 @@ defmodule FinancialAdvisor.Services.AIAgent do
   defp execute_tool(user, "create_calendar_event", params, _id, _conversation) do
     with {:ok, start_dt, _} <- DateTime.from_iso8601(params["start_time"]),
          {:ok, end_dt, _} <- DateTime.from_iso8601(params["end_time"]) do
-      case CalendarService.create_event(
-             user,
-             params["title"],
-             Map.get(params, "description", ""),
-             start_dt,
-             end_dt,
-             Map.get(params, "attendees", [])
-           ) do
-        {:ok, _event} ->
-          "Calendar event created: #{params["title"]} on #{params["start_time"]}"
+      # Validate dates are in the future
+      now = DateTime.utc_now()
 
-        {:error, reason} ->
-          "Error creating event: #{inspect(reason)}"
+      if DateTime.compare(start_dt, now) == :lt do
+        "Error: Cannot create events in the past. Start time must be in the future."
+      else
+        case CalendarService.create_event(
+               user,
+               params["title"],
+               Map.get(params, "description", ""),
+               start_dt,
+               end_dt,
+               Map.get(params, "attendees", [])
+             ) do
+          {:ok, _event} ->
+            "Calendar event created successfully: #{params["title"]} on #{params["start_time"]}"
+
+          {:error, reason} ->
+            "Error creating calendar event: #{inspect(reason)}"
+        end
       end
     else
       {:error, reason} ->
-        "Invalid datetime format: #{inspect(reason)}"
+        "Invalid datetime format: #{inspect(reason)}. Please use ISO8601 format (YYYY-MM-DDTHH:MM:SSZ)"
     end
   end
 
@@ -533,11 +615,12 @@ defmodule FinancialAdvisor.Services.AIAgent do
            params["last_name"],
            Map.get(params, "phone")
          ) do
-      {:ok, _contact} ->
-        "Contact created in HubSpot: #{params["first_name"]} #{params["last_name"]}"
+      {:ok, contact} ->
+        contact_id = contact["id"] || "unknown"
+        "Contact created successfully in HubSpot: #{params["first_name"]} #{params["last_name"]} (ID: #{contact_id})"
 
       {:error, reason} ->
-        "Error creating contact: #{inspect(reason)}"
+        "Error creating HubSpot contact: #{inspect(reason)}"
     end
   end
 
@@ -550,49 +633,111 @@ defmodule FinancialAdvisor.Services.AIAgent do
        ) do
     case HubspotService.add_note_to_contact(user, contact_id, note) do
       {:ok, _} ->
-        "Note added to contact"
+        "Note added successfully to contact #{contact_id}"
 
       {:error, reason} ->
-        "Error adding note: #{inspect(reason)}"
+        "Error adding note to contact: #{inspect(reason)}"
     end
   end
 
   defp execute_tool(user, "save_ongoing_instruction", params, _id, _conversation) do
-    OngoingInstruction.changeset(%OngoingInstruction{}, %{
-      user_id: user.id,
-      instruction: params["instruction"],
-      trigger_type: Map.get(params, "trigger_type", "manual")
-    })
-    |> Repo.insert()
+    case OngoingInstruction.changeset(%OngoingInstruction{}, %{
+           user_id: user.id,
+           instruction: params["instruction"],
+           trigger_type: Map.get(params, "trigger_type", "manual"),
+           status: "active"
+         })
+         |> Repo.insert() do
+      {:ok, _instruction} ->
+        "Ongoing instruction saved successfully. I'll remember this for future interactions."
 
-    "Ongoing instruction saved. I'll remember this for future interactions."
+      {:error, changeset} ->
+        "Error saving instruction: #{inspect(Ecto.Changeset.traverse_errors(changeset, & &1))}"
+    end
   end
 
   defp execute_tool(user, "get_ongoing_instructions", _params, _id, _conversation) do
     instructions = get_active_instructions(user.id)
 
-    instructions
-    |> Enum.map(&"- #{&1.instruction} (#{&1.trigger_type})")
-    |> Enum.join("\n")
+    if Enum.empty?(instructions) do
+      "No active ongoing instructions."
+    else
+      instructions
+      |> Enum.map(fn inst ->
+        "- #{inst.instruction} (Trigger: #{inst.trigger_type})"
+      end)
+      |> Enum.join("\n")
+    end
+  end
+
+  defp execute_tool(user, "get_contact_context", %{"email" => email}, _id, _conversation) do
+    # Search for contact by email
+    case HubspotService.search_contacts(user, email) do
+      {:ok, []} ->
+        "No contact found with email: #{email}"
+
+      {:ok, [contact | _]} ->
+        contact_id = contact["id"]
+        props = contact["properties"] || %{}
+
+        # Get recent emails with this contact
+        recent_emails =
+          from(e in Email,
+            where: e.user_id == ^user.id,
+            where: e.from == ^email or fragment("? = ANY(?)", ^email, e.to),
+            order_by: [desc: e.received_at],
+            limit: 5
+          )
+          |> Repo.all()
+
+        # Build context string
+        contact_info = """
+        Contact Information:
+        - Name: #{props["firstname"] || ""} #{props["lastname"] || ""}
+        - Email: #{props["email"] || email}
+        - Phone: #{props["phone"] || "Not provided"}
+        - HubSpot ID: #{contact_id}
+        """
+
+        email_context =
+          if Enum.empty?(recent_emails) do
+            "\nNo recent emails found with this contact."
+          else
+            email_list =
+              recent_emails
+              |> Enum.map(fn e ->
+                "  - #{e.subject || "No subject"} (#{format_date(e.received_at)})"
+              end)
+              |> Enum.join("\n")
+
+            "\nRecent Emails (#{length(recent_emails)}):\n#{email_list}"
+          end
+
+        contact_info <> email_context
+
+      {:error, reason} ->
+        "Error getting contact context: #{inspect(reason)}"
+    end
   end
 
   defp execute_tool(_user, tool_name, _params, _id, _conversation) do
-    "Unknown tool: #{tool_name}"
+    "Unknown tool: #{tool_name}. Available tools: #{available_tools() |> Enum.map(& &1.name) |> Enum.join(", ")}"
   end
 
-  defp format_search_results(results) do
-    results
-    |> Enum.map(fn %{email: email, similarity: similarity} ->
-      "From: #{email.from}, Subject: #{email.subject}, Relevance: #{Float.round(similarity * 100, 1)}%"
-    end)
-    |> Enum.join("\n")
+  defp save_message_to_conversation(conversation, role, content) do
+    updated_messages = (conversation.messages || []) ++ [%{"role" => role, "content" => content}]
+
+    conversation
+    |> Conversation.changeset(%{messages: updated_messages})
+    |> Repo.update()
   end
 
-  defp format_contact_results(results) do
-    results
-    |> Enum.map(fn contact ->
-      "#{contact["properties"]["firstname"]} #{contact["properties"]["lastname"]} (#{contact["properties"]["email"]})"
-    end)
-    |> Enum.join("\n")
-  end
+  defp format_date(nil), do: "Unknown date"
+  defp format_date(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
+  defp format_date(%NaiveDateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
+  defp format_date(_), do: "Unknown date"
+
+  defp format_datetime(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M UTC")
+  defp format_datetime(%NaiveDateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
+  defp format_datetime(_), do: "Unknown time"
 end

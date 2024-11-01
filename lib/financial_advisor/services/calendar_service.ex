@@ -277,4 +277,20 @@ defmodule FinancialAdvisor.Services.CalendarService do
         {:error, reason}
     end
   end
+
+  def get_upcoming_events(user, days_ahead \\ 7) do
+    time_min = DateTime.utc_now()
+    time_max = DateTime.add(time_min, days_ahead * 24 * 3600)
+
+    events =
+      from(e in CalendarEvent,
+        where: e.user_id == ^user.id,
+        where: e.start_time >= ^time_min,
+        where: e.start_time <= ^time_max,
+        order_by: [asc: e.start_time]
+      )
+      |> Repo.all()
+
+    {:ok, events}
+  end
 end

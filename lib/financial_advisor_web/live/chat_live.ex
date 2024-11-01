@@ -15,12 +15,15 @@ defmodule FinancialAdvisorWeb.ChatLive do
 
       conversation =
         if conversation_id do
-          Repo.get!(Conversation, conversation_id)
+          Repo.get(Conversation, conversation_id) ||
+            Conversation.changeset(%Conversation{}, %{user_id: user.id})
+            |> Repo.insert!()
         else
           Conversation.changeset(%Conversation{}, %{user_id: user.id})
           |> Repo.insert!()
         end
 
+      # Ensure conversation is saved before allowing input
       {:ok,
        socket
        |> assign(
@@ -30,7 +33,8 @@ defmodule FinancialAdvisorWeb.ChatLive do
          messages: conversation.messages || [],
          loading: false,
          chat_task: nil
-       )}
+       )
+       |> push_patch(to: ~p"/chat/#{conversation.id}")}
     end
   end
 
