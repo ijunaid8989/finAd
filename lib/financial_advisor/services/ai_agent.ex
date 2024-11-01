@@ -361,7 +361,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
   # Format message for API - ensure proper structure
   defp format_message_for_api(%{"role" => role, "content" => content}) do
-    formatted_content = 
+    formatted_content =
       case content do
         content when is_binary(content) ->
           content
@@ -375,7 +375,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
         content ->
           to_string(content)
       end
-    
+
     %{
       "role" => role,
       "content" => formatted_content
@@ -444,7 +444,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
       # Ensure all messages are properly formatted with string keys
       formatted_messages = Enum.map(messages, &format_message_for_api/1)
-      
+
       body = %{
         "model" => model,
         "max_tokens" => 4096,
@@ -463,10 +463,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
              ]
            ) do
         {:ok, %Req.Response{status: 200, body: response_body}} ->
-          case Jason.decode(response_body) do
-            {:ok, data} -> {:ok, data}
-            {:error, reason} -> {:error, "Failed to parse response: #{inspect(reason)}"}
-          end
+          # Req automatically decodes JSON, so body is already a map
+          {:ok, response_body}
 
         {:ok, %Req.Response{status: status, body: body}} ->
           Logger.error("Claude API error: status=#{status}, model=#{model}, body=#{inspect(body)}")
