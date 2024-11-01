@@ -68,7 +68,9 @@ if config_env() == :prod do
       ip: {0, 0, 0, 0, 0, 0, 0, 0},
       port: port
     ],
-    secret_key_base: secret_key_base
+    secret_key_base: secret_key_base,
+    # Disable origin check for Render (or set specific origins)
+    check_origin: false
 
   # ## SSL Support
   #
