@@ -58,6 +58,13 @@ if config_env() == :prod do
 
   config :financial_advisor, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # Build allowed origins list from PHX_HOST
+  allowed_origins = [
+    "https://#{host}",
+    "//#{host}",
+    "//#{host}:443"
+  ]
+
   config :financial_advisor, FinancialAdvisorWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
@@ -69,8 +76,8 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base,
-    # Disable origin check for Render (or set specific origins)
-    check_origin: false
+    # Check origin against PHX_HOST value
+    check_origin: allowed_origins
 
   # ## SSL Support
   #
