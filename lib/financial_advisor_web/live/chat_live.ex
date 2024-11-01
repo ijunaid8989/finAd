@@ -28,7 +28,8 @@ defmodule FinancialAdvisorWeb.ChatLive do
          conversation: conversation,
          input: "",
          messages: conversation.messages || [],
-         loading: false
+         loading: false,
+         chat_task: nil
        )}
     end
   end
@@ -78,7 +79,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
           <a href="/settings" class="text-gray-400 hover:text-white text-sm">⚙️ Settings</a>
         </div>
       </div>
-      
+
     <!-- Main Chat Area -->
       <div class="flex-1 flex flex-col bg-gray-900">
         <!-- Messages -->
@@ -131,7 +132,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
             </div>
           <% end %>
         </div>
-        
+
     <!-- Input Area -->
         <div class="border-t border-gray-700 p-4">
           <form phx-submit="send_message">
@@ -221,7 +222,6 @@ defmodule FinancialAdvisorWeb.ChatLive do
   defp stream_response(socket, user_message) do
     user = socket.assigns.user
     conversation = socket.assigns.conversation
-    lv_pid = self()
 
     updated_messages =
       (socket.assigns.messages || []) ++
@@ -234,21 +234,70 @@ defmodule FinancialAdvisorWeb.ChatLive do
     Conversation.changeset(conversation, %{messages: updated_messages})
     |> Repo.update()
 
-    Task.start_link(fn ->
-      case AIAgent.chat(user, user_message, conversation.id) do
-        {:ok, response, tool_results} ->
-          send(lv_pid, {:ai_response, response, tool_results})
+    # Use Task.async instead of Task.start_link to avoid crashing LiveView
+    task =
+      Task.async(fn ->
+        try do
+          case AIAgent.chat(user, user_message, conversation.id) do
+            {:ok, response, tool_results} ->
+              {:ok, response, tool_results}
 
-        {:ok, response} ->
-          send(lv_pid, {:ai_response, response, []})
+            {:ok, response} ->
+              {:ok, response, []}
 
-        {:error, reason} ->
-          Logger.error("AI chat error: #{inspect(reason)}")
-          send(lv_pid, {:ai_error, inspect(reason)})
-      end
-    end)
+            {:error, reason} ->
+              Logger.error("AI chat error: #{inspect(reason)}")
+              {:error, inspect(reason)}
+          end
+        rescue
+          e ->
+            Logger.error("AI chat exception: #{inspect(e)}")
+            {:error, Exception.message(e)}
+        catch
+          :exit, reason ->
+            Logger.error("AI chat exit: #{inspect(reason)}")
+            {:error, "Task exited: #{inspect(reason)}"}
+        end
+      end)
 
     socket
+    |> assign(chat_task: task.ref)
+  end
+
+  def handle_info({ref, result}, socket) when is_reference(ref) do
+    # Task completed - only handle if it's our chat task
+    if socket.assigns[:chat_task] == ref do
+      case result do
+        {:ok, response, tool_results} ->
+          handle_info({:ai_response, response, tool_results}, socket |> assign(:chat_task, nil))
+
+        {:error, error} ->
+          handle_info({:ai_error, error}, socket |> assign(:chat_task, nil))
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, socket) do
+    # Task crashed or exited
+    if socket.assigns[:chat_task] == ref do
+      error_message = "The AI service encountered an error. Please try again."
+      Logger.error("Chat task crashed: #{inspect(reason)}")
+
+      updated_messages =
+        (socket.assigns.messages || []) ++
+          [
+            %{"role" => "assistant", "content" => error_message}
+          ]
+
+      {:noreply,
+       socket
+       |> assign(messages: updated_messages, loading: false)
+       |> assign(:chat_task, nil)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:ai_response, response, tool_results}, socket) do
@@ -275,7 +324,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
 
     {:noreply,
      socket
-     |> assign(messages: updated_messages, loading: false)}
+     |> assign(messages: updated_messages, loading: false, chat_task: nil)}
   end
 
   def handle_info({:ai_error, error}, socket) do
@@ -289,6 +338,6 @@ defmodule FinancialAdvisorWeb.ChatLive do
 
     {:noreply,
      socket
-     |> assign(messages: updated_messages, loading: false)}
+     |> assign(messages: updated_messages, loading: false, chat_task: nil)}
   end
 end
