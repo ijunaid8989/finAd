@@ -356,7 +356,43 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
   defp normalize_message_content(content) when is_binary(content), do: content
   defp normalize_message_content(content) when is_list(content), do: content
+  defp normalize_message_content(content) when is_map(content), do: content
   defp normalize_message_content(_), do: ""
+
+  # Format message for API - ensure proper structure
+  defp format_message_for_api(%{"role" => role, "content" => content}) do
+    formatted_content = 
+      case content do
+        content when is_binary(content) ->
+          content
+        content when is_list(content) ->
+          # Ensure all list items are properly formatted maps
+          Enum.map(content, fn
+            item when is_map(item) -> item
+            item when is_binary(item) -> %{"type" => "text", "text" => item}
+            item -> %{"type" => "text", "text" => to_string(item)}
+          end)
+        content ->
+          to_string(content)
+      end
+    
+    %{
+      "role" => role,
+      "content" => formatted_content
+    }
+  end
+
+  defp format_message_for_api(%{role: role, content: content}) do
+    format_message_for_api(%{"role" => to_string(role), "content" => content})
+  end
+
+  defp format_message_for_api(message) do
+    # Fallback for any other format
+    %{
+      "role" => Map.get(message, "role") || Map.get(message, :role) || "user",
+      "content" => Map.get(message, "content") || Map.get(message, :content) || ""
+    }
+  end
 
   defp format_instructions(instructions) do
     if Enum.empty?(instructions) do
@@ -406,13 +442,16 @@ defmodule FinancialAdvisor.Services.AIAgent do
     else
       model = config().model
 
+      # Ensure all messages are properly formatted with string keys
+      formatted_messages = Enum.map(messages, &format_message_for_api/1)
+      
       body = %{
-        model: model,
-        max_tokens: 4096,
-        system:
+        "model" => model,
+        "max_tokens" => 4096,
+        "system" =>
           "You are a helpful AI assistant for financial advisors. Use the provided tools to help users manage their contacts and schedule. Pay attention to date/time context provided in the system message.",
-        messages: messages,
-        tools: available_tools()
+        "messages" => formatted_messages,
+        "tools" => available_tools()
       }
 
       case Req.post(@claude_api_url,
@@ -468,7 +507,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
       |> Enum.map(fn {{_name, _input, tool_id}, {_result_id, result}} ->
         # Ensure result is a string
         content = if(is_binary(result), do: result, else: Jason.encode!(result))
-        
+
         %{
           "type" => "tool_result",
           "tool_use_id" => tool_id,
