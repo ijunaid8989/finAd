@@ -65,7 +65,14 @@ defmodule FinancialAdvisor.MixProject do
       {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:httpoison, "~> 2.0"},
+      {:elixir_uuid, "~> 1.2"},
+      {:joken, "~> 2.6"},
+      {:cors_plug, "~> 3.0"},
+      {:oban, "~> 2.17"},
+      {:quantum, "~> 3.5"},
+      {:pgvector, "~> 0.2"}
     ]
   end
 
