@@ -8,40 +8,29 @@ defmodule FinancialAdvisor.Services.GmailService do
 
   @gmail_api_url "https://www.googleapis.com/gmail/v1/users/me"
 
-  def get_access_token(user) do
-    token = user.google_access_token
-    # TODO: Check token expiry and refresh if needed
-    {:ok, token}
-  end
-
   def sync_emails(user, limit \\ 100) do
-    with {:ok, access_token} <- get_access_token(user) do
-      case list_messages(access_token, limit) do
-        {:ok, messages} ->
-          messages
-          |> Enum.map(&fetch_and_store_message(user, access_token, &1))
-          |> Enum.count(&match?({:ok, _}, &1))
+    case list_messages(user, limit) do
+      {:ok, messages} ->
+        messages
+        |> Enum.map(&fetch_and_store_message(user, &1))
+        |> Enum.count(&match?({:ok, _}, &1))
 
-        {:error, reason} ->
-          Logger.error("Failed to list Gmail messages: #{inspect(reason)}")
-          {:error, reason}
-      end
+      {:error, reason} ->
+        Logger.error("Failed to list Gmail messages: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
-  def list_messages(access_token, limit \\ 100) do
+  def list_messages(user, limit \\ 100) do
     query =
       URI.encode_query(%{
         q: "newer_than:7d",
         maxResults: limit
       })
 
-    case HTTPoison.get(
-           "#{@gmail_api_url}/messages?#{query}",
-           [{"Authorization", "Bearer #{access_token}"}]
-         ) do
-      {:ok, response} ->
-        response.body |> Jason.decode!() |> (&{:ok, Map.get(&1, "messages", [])}).()
+    case GoogleOAuth.make_request(:get, "#{@gmail_api_url}/messages?#{query}", user) do
+      {:ok, response_body} ->
+        response_body |> Jason.decode!() |> (&{:ok, Map.get(&1, "messages", [])}).()
 
       {:error, reason} ->
         Logger.error("Failed to list messages: #{inspect(reason)}")
@@ -49,13 +38,14 @@ defmodule FinancialAdvisor.Services.GmailService do
     end
   end
 
-  def get_message(access_token, message_id) do
-    case HTTPoison.get(
+  def get_message(user, message_id) do
+    case GoogleOAuth.make_request(
+           :get,
            "#{@gmail_api_url}/messages/#{message_id}?format=full",
-           [{"Authorization", "Bearer #{access_token}"}]
+           user
          ) do
-      {:ok, response} ->
-        response.body |> Jason.decode!() |> (&{:ok, &1}).()
+      {:ok, response_body} ->
+        response_body |> Jason.decode!() |> (&{:ok, &1}).()
 
       {:error, reason} ->
         Logger.error("Failed to fetch message: #{inspect(reason)}")
@@ -63,8 +53,8 @@ defmodule FinancialAdvisor.Services.GmailService do
     end
   end
 
-  defp fetch_and_store_message(user, access_token, message_ref) do
-    with {:ok, full_message} <- get_message(access_token, message_ref["id"]) do
+  defp fetch_and_store_message(user, message_ref) do
+    with {:ok, full_message} <- get_message(user, message_ref["id"]) do
       parsed = parse_message(full_message)
 
       case Email.changeset(%Email{}, Map.merge(parsed, %{user_id: user.id}))
@@ -160,7 +150,6 @@ defmodule FinancialAdvisor.Services.GmailService do
         datetime
 
       :error ->
-        # Fallback to current time if parsing fails
         DateTime.utc_now()
     end
   rescue
@@ -172,10 +161,8 @@ defmodule FinancialAdvisor.Services.GmailService do
   defp parse_timestamp(_), do: DateTime.utc_now()
 
   def send_email(user, to, subject, body) do
-    with {:ok, access_token} <- get_access_token(user),
-         raw_message <- create_raw_message(user.email, to, subject, body) do
-      send_raw_message(access_token, raw_message)
-    end
+    raw_message = create_raw_message(user.email, to, subject, body)
+    send_raw_message(user, raw_message)
   end
 
   defp create_raw_message(from, to, subject, body) do
@@ -194,19 +181,17 @@ defmodule FinancialAdvisor.Services.GmailService do
     |> String.trim("=")
   end
 
-  defp send_raw_message(access_token, raw_message) do
+  defp send_raw_message(user, raw_message) do
     body = Jason.encode!(%{raw: raw_message})
 
-    case HTTPoison.post(
+    case GoogleOAuth.make_request(
+           :post,
            "#{@gmail_api_url}/messages/send",
-           body,
-           [
-             {"Authorization", "Bearer #{access_token}"},
-             {"Content-Type", "application/json"}
-           ]
+           user,
+           body
          ) do
-      {:ok, response} ->
-        response.body |> Jason.decode!() |> (&{:ok, &1}).()
+      {:ok, response_body} ->
+        response_body |> Jason.decode!() |> (&{:ok, &1}).()
 
       {:error, reason} ->
         Logger.error("Failed to send email: #{inspect(reason)}")
@@ -215,27 +200,18 @@ defmodule FinancialAdvisor.Services.GmailService do
   end
 
   def watch_emails(user) do
-    with {:ok, access_token} <- get_access_token(user) do
-      body =
-        Jason.encode!(%{
-          topicName: "projects/YOUR_PROJECT_ID/topics/gmail-events"
-        })
+    body =
+      Jason.encode!(%{
+        topicName: "projects/YOUR_PROJECT_ID/topics/gmail-events"
+      })
 
-      case HTTPoison.post(
-             "#{@gmail_api_url}/watch",
-             body,
-             [
-               {"Authorization", "Bearer #{access_token}"},
-               {"Content-Type", "application/json"}
-             ]
-           ) do
-        {:ok, response} ->
-          response.body |> Jason.decode!() |> (&{:ok, &1}).()
+    case GoogleOAuth.make_request(:post, "#{@gmail_api_url}/watch", user, body) do
+      {:ok, response_body} ->
+        response_body |> Jason.decode!() |> (&{:ok, &1}).()
 
-        {:error, reason} ->
-          Logger.error("Failed to setup Gmail watch: #{inspect(reason)}")
-          {:error, reason}
-      end
+      {:error, reason} ->
+        Logger.error("Failed to setup Gmail watch: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 end

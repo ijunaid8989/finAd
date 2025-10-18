@@ -143,7 +143,6 @@ defmodule FinancialAdvisor.Services.EmbeddingsService do
           limit: ^limit
         )
         |> Repo.all()
-        |> IO.inspect()
 
       {:ok, contacts}
     end

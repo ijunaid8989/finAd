@@ -145,8 +145,6 @@ defmodule FinancialAdvisor.Services.HubspotService do
   end
 
   defp refresh_and_retry(method, url, user, body) do
-    IO.inspect(user)
-
     with {:ok, token_data} <- HubspotOAuth.refresh_token(user.hubspot_refresh_token),
          new_token = token_data["access_token"],
          referesh_token = token_data["refresh_token"],
@@ -199,8 +197,7 @@ defmodule FinancialAdvisor.Services.HubspotService do
     parsed = parse_contact(contact_data)
 
     case HubspotContact.changeset(%HubspotContact{}, Map.merge(parsed, %{user_id: user.id}))
-         |> Repo.insert(on_conflict: :nothing)
-         |> IO.inspect() do
+         |> Repo.insert(on_conflict: :nothing) do
       {:ok, contact} ->
         create_embeddings(contact)
         {:ok, contact}

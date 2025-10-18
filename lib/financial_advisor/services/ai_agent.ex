@@ -294,6 +294,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
         # Process tool calls if any
         {tool_calls, text_response} = process_content_blocks(content, user)
+        IO.inspect(tool_calls)
 
         # Store message in conversation
         updated_messages = [
@@ -482,5 +483,4 @@ defmodule FinancialAdvisor.Services.AIAgent do
     end)
     |> Enum.join("\n")
   end
-  |> IO.inspect()
 end
