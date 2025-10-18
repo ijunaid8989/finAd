@@ -78,7 +78,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
           <a href="/settings" class="text-gray-400 hover:text-white text-sm">⚙️ Settings</a>
         </div>
       </div>
-      
+
     <!-- Main Chat Area -->
       <div class="flex-1 flex flex-col bg-gray-900">
         <!-- Messages -->
@@ -131,7 +131,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
             </div>
           <% end %>
         </div>
-        
+
     <!-- Input Area -->
         <div class="border-t border-gray-700 p-4">
           <form phx-submit="send_message">
@@ -200,6 +200,24 @@ defmodule FinancialAdvisorWeb.ChatLive do
      |> redirect(to: ~p"/chat/#{conversation.id}")}
   end
 
+  def handle_event("sync_emails", _params, socket) do
+    user = socket.assigns.user
+    Task.start_link(fn -> FinancialAdvisor.Services.GmailService.sync_emails(user, 100) end)
+    {:noreply, socket |> put_flash(:info, "Syncing emails...")}
+  end
+
+  def handle_event("sync_calendar", _params, socket) do
+    user = socket.assigns.user
+    Task.start_link(fn -> FinancialAdvisor.Services.CalendarService.sync_events(user) end)
+    {:noreply, socket |> put_flash(:info, "Syncing calendar...")}
+  end
+
+  def handle_event("sync_contacts", _params, socket) do
+    user = socket.assigns.user
+    Task.start_link(fn -> FinancialAdvisor.Services.HubspotService.sync_contacts(user, 100) end)
+    {:noreply, socket |> put_flash(:info, "Syncing contacts...")}
+  end
+
   defp stream_response(socket, user_message) do
     user = socket.assigns.user
     conversation = socket.assigns.conversation
@@ -260,23 +278,5 @@ defmodule FinancialAdvisorWeb.ChatLive do
     {:noreply,
      socket
      |> assign(messages: updated_messages, loading: false)}
-  end
-
-  def handle_event("sync_emails", _params, socket) do
-    user = socket.assigns.user
-    Task.start_link(fn -> FinancialAdvisor.Services.GmailService.sync_emails(user, 100) end)
-    {:noreply, socket |> put_flash(:info, "Syncing emails...")}
-  end
-
-  def handle_event("sync_calendar", _params, socket) do
-    user = socket.assigns.user
-    Task.start_link(fn -> FinancialAdvisor.Services.CalendarService.sync_events(user) end)
-    {:noreply, socket |> put_flash(:info, "Syncing calendar...")}
-  end
-
-  def handle_event("sync_contacts", _params, socket) do
-    user = socket.assigns.user
-    Task.start_link(fn -> FinancialAdvisor.Services.HubspotService.sync_contacts(user, 100) end)
-    {:noreply, socket |> put_flash(:info, "Syncing contacts...")}
   end
 end
