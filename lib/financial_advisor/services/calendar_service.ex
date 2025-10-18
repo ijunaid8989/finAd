@@ -20,9 +20,7 @@ defmodule FinancialAdvisor.Services.CalendarService do
       case list_events(access_token, calendar_id, time_min) do
         {:ok, events} ->
           events
-          |> IO.inspect()
           |> Enum.map(&store_event(user, &1))
-          |> IO.inspect()
           |> Enum.count(&match?({:ok, _}, &1))
 
         {:error, reason} ->
