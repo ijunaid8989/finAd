@@ -9,11 +9,9 @@ defmodule FinancialAdvisor.OAuth.HubspotOAuth do
 
   def config do
     %{
-      client_id: System.get_env("HUBSPOT_CLIENT_ID", "8d697191-a8e4-4d03-bc1e-662d4eb27559"),
-      client_secret:
-        System.get_env("HUBSPOT_CLIENT_SECRET", "e6de7ae9-02c3-4316-9eeb-2527fdfac0ea"),
-      redirect_uri:
-        System.get_env("HUBSPOT_REDIRECT_URI", "http://localhost:4000/oauth/hubspot/callback")
+      client_id: System.get_env("HUBSPOT_CLIENT_ID"),
+      client_secret: System.get_env("HUBSPOT_CLIENT_SECRET"),
+      redirect_uri: System.get_env("HUBSPOT_REDIRECT_URI")
     }
   end
 

@@ -17,15 +17,9 @@ defmodule FinancialAdvisor.OAuth.GoogleOAuth do
 
   def config do
     %{
-      client_id:
-        System.get_env(
-          "GOOGLE_CLIENT_ID",
-          "779611651577-b2sko709crlmcnioj1almkoni55nam1o.apps.googleusercontent.com"
-        ),
-      client_secret:
-        System.get_env("GOOGLE_CLIENT_SECRET", "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"),
-      redirect_uri:
-        System.get_env("GOOGLE_REDIRECT_URI", "http://localhost:4000/oauth/google/callback")
+      client_id: System.get_env("GOOGLE_CLIENT_ID"),
+      client_secret: System.get_env("GOOGLE_CLIENT_SECRET"),
+      redirect_uri: System.get_env("GOOGLE_REDIRECT_URI")
     }
   end
 

@@ -13,11 +13,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
   def config do
     %{
-      api_key:
-        System.get_env(
-          "CLAUDE_API_KEY",
-          "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"
-        )
+      api_key: System.get_env("CLAUDE_API_KEY")
     }
   end
 
