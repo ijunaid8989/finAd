@@ -109,7 +109,8 @@ defmodule FinancialAdvisor.Services.CalendarService do
                {"Authorization", "Bearer #{access_token}"},
                {"Content-Type", "application/json"}
              ]
-           ) do
+           )
+           |> IO.inspect() do
         {:ok, response} ->
           response.body |> Jason.decode!() |> (&{:ok, &1}).()
 

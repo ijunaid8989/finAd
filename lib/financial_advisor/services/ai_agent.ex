@@ -282,6 +282,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
     case HTTPoison.post(@claude_api_url, body, headers) do
       {:ok, response} ->
+        IO.inspect(response)
         handle_claude_response(user, response, conversation, messages)
 
       {:error, reason} ->
@@ -399,8 +400,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
              user,
              params["title"],
              Map.get(params, "description", ""),
-             elem(start_dt, 0),
-             elem(end_dt, 0),
+             start_dt,
+             end_dt,
              Map.get(params, "attendees", [])
            ) do
         {:ok, event} ->
@@ -485,4 +486,5 @@ defmodule FinancialAdvisor.Services.AIAgent do
     end)
     |> Enum.join("\n")
   end
+  |> IO.inspect()
 end

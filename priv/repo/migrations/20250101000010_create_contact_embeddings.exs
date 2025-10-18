@@ -3,13 +3,13 @@ defmodule FinancialAdvisor.Repo.Migrations.CreateContactEmbeddings do
 
   def change do
     create table(:contact_embeddings) do
-      add :contact_id, references(:hubspot_contacts), null: false
+      add :hubspot_contact_id, references(:hubspot_contacts), null: false
       add :embedding, :vector, size: 1536
       add :content_hash, :string
 
       timestamps()
     end
 
-    create index(:contact_embeddings, [:contact_id])
+    create index(:contact_embeddings, [:hubspot_contact_id])
   end
 end

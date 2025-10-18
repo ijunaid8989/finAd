@@ -4,6 +4,7 @@ defmodule FinancialAdvisor.Services.GmailService do
   alias FinancialAdvisor.User
   alias FinancialAdvisor.Email
   alias FinancialAdvisor.OAuth.GoogleOAuth
+  alias FinancialAdvisor.Services.EmbeddingsService
 
   @gmail_api_url "https://www.googleapis.com/gmail/v1/users/me"
 
@@ -66,13 +67,29 @@ defmodule FinancialAdvisor.Services.GmailService do
     with {:ok, full_message} <- get_message(access_token, message_ref["id"]) do
       parsed = parse_message(full_message)
 
-      Email.changeset(%Email{}, Map.merge(parsed, %{user_id: user.id}))
-      |> Repo.insert(on_conflict: :nothing)
+      case Email.changeset(%Email{}, Map.merge(parsed, %{user_id: user.id}))
+           |> Repo.insert(
+             on_conflict: :nothing,
+             conflict_target: [:user_id, :gmail_id],
+             returning: true
+           ) do
+        {:ok, email} ->
+          create_embeddings(email)
+          {:ok, email}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
+  defp create_embeddings(%{id: nil}), do: :noop
+
+  defp create_embeddings(email) do
+    EmbeddingsService.embed_email(email)
+  end
+
   defp parse_message(message) do
-    IO.inspect(message, label: "Message")
     headers = message["payload"]["headers"] || []
     subject = find_header(headers, "Subject") || "(no subject)"
     from = find_header(headers, "From") || "unknown"

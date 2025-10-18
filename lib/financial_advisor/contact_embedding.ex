@@ -6,14 +6,14 @@ defmodule FinancialAdvisor.ContactEmbedding do
     field :embedding, Pgvector.Ecto.Vector
     field :content_hash, :string
 
-    belongs_to :contact, FinancialAdvisor.HubspotContact
+    belongs_to :hubspot_contact, FinancialAdvisor.HubspotContact
 
     timestamps()
   end
 
   def changeset(emb, attrs) do
     emb
-    |> cast(attrs, [:embedding, :content_hash, :contact_id])
-    |> validate_required([:embedding, :contact_id])
+    |> cast(attrs, [:embedding, :content_hash, :hubspot_contact_id])
+    |> validate_required([:embedding, :hubspot_contact_id])
   end
 end

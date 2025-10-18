@@ -103,7 +103,7 @@ defmodule FinancialAdvisor.Scheduler do
       from(c in FinancialAdvisor.HubspotContact,
         where: c.user_id == ^user.id,
         left_join: emb in FinancialAdvisor.ContactEmbedding,
-        on: emb.contact_id == c.id,
+        on: emb.hubspot_contact_id == c.id,
         where: is_nil(emb.id),
         select: c
       )

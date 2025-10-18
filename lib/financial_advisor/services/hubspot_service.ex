@@ -3,6 +3,7 @@ defmodule FinancialAdvisor.Services.HubspotService do
   alias FinancialAdvisor.Repo
   alias FinancialAdvisor.HubspotContact
   alias FinancialAdvisor.OAuth.HubspotOAuth
+  alias FinancialAdvisor.Services.EmbeddingsService
 
   @hubspot_api_url "https://api.hubapi.com"
 
@@ -148,7 +149,8 @@ defmodule FinancialAdvisor.Services.HubspotService do
 
     with {:ok, token_data} <- HubspotOAuth.refresh_token(user.hubspot_refresh_token),
          new_token = token_data["access_token"],
-         {:ok, _} <- update_user_token(user, new_token),
+         referesh_token = token_data["refresh_token"],
+         {:ok, _} <- update_user_token(user, new_token, referesh_token),
          headers = [
            {"Authorization", "Bearer #{new_token}"},
            {"Content-Type", "application/json"}
@@ -165,9 +167,10 @@ defmodule FinancialAdvisor.Services.HubspotService do
     end
   end
 
-  defp update_user_token(user, new_token) do
+  defp update_user_token(user, new_token, refresh_token) do
     user
     |> Ecto.Changeset.change(hubspot_access_token: new_token)
+    |> Ecto.Changeset.change(hubspot_refresh_token: refresh_token)
     |> Repo.update()
   end
 
@@ -195,8 +198,22 @@ defmodule FinancialAdvisor.Services.HubspotService do
   defp store_contact(user, contact_data) do
     parsed = parse_contact(contact_data)
 
-    HubspotContact.changeset(%HubspotContact{}, Map.merge(parsed, %{user_id: user.id}))
-    |> Repo.insert(on_conflict: :nothing)
+    case HubspotContact.changeset(%HubspotContact{}, Map.merge(parsed, %{user_id: user.id}))
+         |> Repo.insert(on_conflict: :nothing)
+         |> IO.inspect() do
+      {:ok, contact} ->
+        create_embeddings(contact)
+        {:ok, contact}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp create_embeddings(%{id: nil}), do: :noop
+
+  defp create_embeddings(contact) do
+    EmbeddingsService.embed_contact(contact)
   end
 
   defp parse_contact(contact) do

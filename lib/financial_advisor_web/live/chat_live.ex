@@ -78,7 +78,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
           <a href="/settings" class="text-gray-400 hover:text-white text-sm">⚙️ Settings</a>
         </div>
       </div>
-
+      
     <!-- Main Chat Area -->
       <div class="flex-1 flex flex-col bg-gray-900">
         <!-- Messages -->
@@ -131,7 +131,7 @@ defmodule FinancialAdvisorWeb.ChatLive do
             </div>
           <% end %>
         </div>
-
+        
     <!-- Input Area -->
         <div class="border-t border-gray-700 p-4">
           <form phx-submit="send_message">
@@ -236,11 +236,11 @@ defmodule FinancialAdvisorWeb.ChatLive do
 
     Task.start_link(fn ->
       case AIAgent.chat(user, user_message, conversation.id) do
-        {:ok, response, _tool_results} ->
-          send(lv_pid, {:ai_response, response})
+        {:ok, response, tool_results} ->
+          send(lv_pid, {:ai_response, response, tool_results})
 
         {:ok, response} ->
-          send(lv_pid, {:ai_response, response})
+          send(lv_pid, {:ai_response, response, []})
 
         {:error, reason} ->
           Logger.error("AI chat error: #{inspect(reason)}")
@@ -251,11 +251,23 @@ defmodule FinancialAdvisorWeb.ChatLive do
     socket
   end
 
-  def handle_info({:ai_response, response}, socket) do
+  def handle_info({:ai_response, response, tool_results}, socket) do
+    tool_results_text =
+      tool_results
+      |> Enum.map(fn result -> "Tool result: #{result}" end)
+      |> Enum.join("\n\n")
+
+    full_response =
+      if tool_results_text != "" do
+        "#{response}\n\n#{tool_results_text}"
+      else
+        response
+      end
+
     updated_messages =
       (socket.assigns.messages || []) ++
         [
-          %{"role" => "assistant", "content" => response}
+          %{"role" => "assistant", "content" => full_response}
         ]
 
     Conversation.changeset(socket.assigns.conversation, %{messages: updated_messages})

@@ -26,7 +26,7 @@ defmodule FinancialAdvisor.Services.EmbeddingsService do
           embedding: embedding,
           content_hash: content_hash
         })
-        |> Repo.insert(on_conflict: :replace_all)
+        |> Repo.insert()
 
       {:error, reason} ->
         Logger.error("Failed to embed email: #{inspect(reason)}")
@@ -41,11 +41,11 @@ defmodule FinancialAdvisor.Services.EmbeddingsService do
     case get_embedding(content) do
       {:ok, embedding} ->
         ContactEmbedding.changeset(%ContactEmbedding{}, %{
-          contact_id: contact.id,
+          hubspot_contact_id: contact.id,
           embedding: embedding,
           content_hash: content_hash
         })
-        |> Repo.insert(on_conflict: :replace_all)
+        |> Repo.insert()
 
       {:error, reason} ->
         Logger.error("Failed to embed contact: #{inspect(reason)}")
@@ -129,7 +129,7 @@ defmodule FinancialAdvisor.Services.EmbeddingsService do
         from(c in HubspotContact,
           where: c.user_id == ^user_id,
           join: emb in ContactEmbedding,
-          on: emb.contact_id == c.id,
+          on: emb.hubspot_contact_id == c.id,
           select: %{
             contact: c,
             similarity:
@@ -143,14 +143,14 @@ defmodule FinancialAdvisor.Services.EmbeddingsService do
           limit: ^limit
         )
         |> Repo.all()
+        |> IO.inspect()
 
       {:ok, contacts}
     end
   end
 
   defp hash_content(content) do
-    content
-    |> :crypto.hash(:sha256)
+    :crypto.hash(:sha256, content)
     |> Base.encode16(case: :lower)
   end
 end

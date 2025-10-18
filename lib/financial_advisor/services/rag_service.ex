@@ -30,12 +30,14 @@ defmodule FinancialAdvisor.Services.RAGService do
   defp format_email_results(results) do
     results
     |> Enum.map(fn %{email: email, similarity: similarity} ->
+      body = email.body || ""
+
       """
       - From: #{email.from}
         Subject: #{email.subject}
         Date: #{email.received_at}
         Relevance: #{Float.round(similarity * 100, 1)}%
-        Body: #{String.slice(email.body, 0..500)}...
+        Body: #{String.slice(body, 0..500)}...
       """
     end)
     |> Enum.join("\n")
