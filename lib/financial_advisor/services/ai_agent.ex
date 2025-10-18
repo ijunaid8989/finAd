@@ -5,7 +5,16 @@ defmodule FinancialAdvisor.Services.AIAgent do
   alias FinancialAdvisor.Conversation
   alias FinancialAdvisor.Task
   alias FinancialAdvisor.OngoingInstruction
-  alias FinancialAdvisor.Services.{RAGService, GmailService, CalendarService, HubspotService}
+
+  alias FinancialAdvisor.Services.{
+    RAGService,
+    GmailService,
+    CalendarService,
+    HubspotService,
+    SearchHelper,
+    TaskManager
+  }
+
   import Ecto.Query
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
@@ -85,7 +94,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
       },
       %{
         name: "create_calendar_event",
-        description: "Create a calendar event",
+        description:
+          "Create a calendar event. IMPORTANT: Use ISO8601 format for times. Examples: 2025-10-21T14:00:00Z (next Tuesday 2PM UTC), 2025-10-22T21:00:00Z (next Wednesday 9PM UTC)",
         input_schema: %{
           type: "object",
           properties: %{
@@ -99,11 +109,13 @@ defmodule FinancialAdvisor.Services.AIAgent do
             },
             start_time: %{
               type: "string",
-              description: "Start time in ISO8601 format"
+              description:
+                "Start time in ISO8601 format (YYYY-MM-DDTHH:MM:SSZ). ALWAYS use current or future dates, never past dates."
             },
             end_time: %{
               type: "string",
-              description: "End time in ISO8601 format"
+              description:
+                "End time in ISO8601 format (YYYY-MM-DDTHH:MM:SSZ). Must be after start_time."
             },
             attendees: %{
               type: "array",
@@ -185,6 +197,20 @@ defmodule FinancialAdvisor.Services.AIAgent do
           properties: %{},
           required: []
         }
+      },
+      %{
+        name: "get_contact_context",
+        description: "Get detailed context about a contact including recent emails and notes",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            email: %{
+              type: "string",
+              description: "Email address of the contact"
+            }
+          },
+          required: ["email"]
+        }
       }
     ]
   end
@@ -209,16 +235,55 @@ defmodule FinancialAdvisor.Services.AIAgent do
   end
 
   defp build_message_history(conversation, user_message, rag_context, instructions) do
+    # Get current date/time information for Claude
+    now = DateTime.utc_now()
+    current_date = DateTime.to_date(now)
+    current_day_name = Calendar.strftime(now, "%A")
+
+    # Calculate all weekdays for reference
+    dates_map = calculate_weekday_dates(current_date)
+
     system_prompt = """
     You are an AI assistant for a Financial Advisor. You have access to the user's emails, calendar, and HubSpot contacts.
+
+    ⏰ **IMPORTANT TIME CONTEXT** (Use this for ALL date calculations):
+    - Current Date/Time: #{DateTime.to_iso8601(now)}
+    - Today: #{current_day_name}, #{Calendar.strftime(current_date, "%B %d, %Y")}
+
+    **Next Occurrences of Each Day:**
+    - Monday: #{Calendar.strftime(dates_map.monday, "%B %d, %Y")} (#{dates_map.monday})
+    - Tuesday: #{Calendar.strftime(dates_map.tuesday, "%B %d, %Y")} (#{dates_map.tuesday})
+    - Wednesday: #{Calendar.strftime(dates_map.wednesday, "%B %d, %Y")} (#{dates_map.wednesday})
+    - Thursday: #{Calendar.strftime(dates_map.thursday, "%B %d, %Y")} (#{dates_map.thursday})
+    - Friday: #{Calendar.strftime(dates_map.friday, "%B %d, %Y")} (#{dates_map.friday})
+    - Saturday: #{Calendar.strftime(dates_map.saturday, "%B %d, %Y")} (#{dates_map.saturday})
+    - Sunday: #{Calendar.strftime(dates_map.sunday, "%B %d, %Y")} (#{dates_map.sunday})
 
     Your responsibilities:
     1. Answer questions about clients by using information from emails and HubSpot
     2. Help schedule appointments and manage tasks
-    3. Remember and execute ongoing instructions like "When someone emails, create a contact in HubSpot"
+    3. Remember and execute ongoing instructions
     4. Use tool calling to interact with Gmail, Google Calendar, and HubSpot
+    5. Be proactive in searching for context before taking actions
 
-    Always be helpful, professional, and accurate. When you need information, use the available tools.
+    ## When Creating Calendar Events:
+    - ALWAYS use ISO8601 format: YYYY-MM-DDTHH:MM:SSZ
+    - NEVER use past dates - always use the dates provided above
+    - When user says a day name (e.g., "Thursday"), use the date from the list above
+    - When user says "tomorrow", use: #{Calendar.strftime(Date.add(current_date, 1), "%Y-%m-%d")}
+    - When user says "next [day]", use the corresponding date from above
+    - Always add timezone suffix: Z for UTC times
+
+    **Time Format Examples:**
+    - 9PM UTC: T21:00:00Z
+    - 9:15PM UTC: T21:15:00Z
+    - 2:30PM UTC: T14:30:00Z
+    - Midnight UTC: T00:00:00Z
+
+    **Calendar Event Examples:**
+    - If user: "add event on thursday at 9PM", use: #{dates_map.thursday}T21:00:00Z
+    - If user: "schedule for next monday at 2:30PM", use: #{dates_map.monday}T14:30:00Z
+    - If user: "tomorrow at 10AM", use: #{Date.add(current_date, 1)}T10:00:00Z
 
     ## Relevant Context from RAG:
     #{rag_context}
@@ -226,7 +291,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
     ## Active Ongoing Instructions:
     #{format_instructions(instructions)}
 
-    Remember to use tool_use blocks to call functions when needed.
+    Remember to use tool_use blocks to call functions when needed. Be helpful, professional, and thorough.
     """
 
     previous_messages =
@@ -253,6 +318,59 @@ defmodule FinancialAdvisor.Services.AIAgent do
     |> Enum.join("\n")
   end
 
+  defp calculate_weekday_dates(reference_date) do
+    current_day = Date.day_of_week(reference_date)
+
+    # Calculate days until each weekday (1=Monday, 7=Sunday)
+    days_map = %{
+      1 =>
+        if(current_day > 1,
+          do: 8 - current_day + 1,
+          else: if(current_day == 1, do: 7, else: 1 - current_day)
+        ),
+      2 =>
+        if(current_day > 2,
+          do: 9 - current_day,
+          else: if(current_day == 2, do: 7, else: 2 - current_day)
+        ),
+      3 =>
+        if(current_day > 3,
+          do: 10 - current_day,
+          else: if(current_day == 3, do: 7, else: 3 - current_day)
+        ),
+      4 =>
+        if(current_day > 4,
+          do: 11 - current_day,
+          else: if(current_day == 4, do: 7, else: 4 - current_day)
+        ),
+      5 =>
+        if(current_day > 5,
+          do: 12 - current_day,
+          else: if(current_day == 5, do: 7, else: 5 - current_day)
+        ),
+      6 =>
+        if(current_day > 6,
+          do: 13 - current_day,
+          else: if(current_day == 6, do: 7, else: 6 - current_day)
+        ),
+      7 =>
+        if(current_day > 7,
+          do: 14 - current_day,
+          else: if(current_day == 7, do: 7, else: 7 - current_day)
+        )
+    }
+
+    %{
+      monday: Date.add(reference_date, Map.get(days_map, 1)),
+      tuesday: Date.add(reference_date, Map.get(days_map, 2)),
+      wednesday: Date.add(reference_date, Map.get(days_map, 3)),
+      thursday: Date.add(reference_date, Map.get(days_map, 4)),
+      friday: Date.add(reference_date, Map.get(days_map, 5)),
+      saturday: Date.add(reference_date, Map.get(days_map, 6)),
+      sunday: Date.add(reference_date, Map.get(days_map, 7))
+    }
+  end
+
   defp get_active_instructions(user_id) do
     OngoingInstruction
     |> where([oi], oi.user_id == ^user_id and oi.status == "active")
@@ -271,14 +389,13 @@ defmodule FinancialAdvisor.Services.AIAgent do
         model: @model,
         max_tokens: 2048,
         system:
-          "You are a helpful AI assistant for financial advisors. Use the provided tools to help users manage their contacts and schedule.",
+          "You are a helpful AI assistant for financial advisors. Use the provided tools to help users manage their contacts and schedule. Pay attention to date/time context provided by the system.",
         messages: messages,
         tools: available_tools()
       })
 
     case HTTPoison.post(@claude_api_url, body, headers) do
       {:ok, response} ->
-        IO.inspect(response)
         handle_claude_response(user, response, conversation, messages)
 
       {:error, reason} ->
@@ -292,9 +409,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
       {:ok, data} ->
         content = data["content"] || []
 
-        # Process tool calls if any
         {tool_calls, text_response} = process_content_blocks(content, user)
-        IO.inspect(tool_calls)
 
         # Store message in conversation
         updated_messages = [
@@ -309,7 +424,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
         # If there were tool calls, execute them
         if tool_calls != [] do
-          {:ok, text_response, execute_tools(user, tool_calls, conversation)}
+          results = execute_tools(user, tool_calls, conversation)
+          {:ok, text_response, results}
         else
           {:ok, text_response}
         end
@@ -362,6 +478,10 @@ defmodule FinancialAdvisor.Services.AIAgent do
     end
   end
 
+  defp execute_tool(user, "get_contact_context", %{"email" => email}, _id, _conversation) do
+    SearchHelper.get_contact_context(user.id, email)
+  end
+
   defp execute_tool(user, "get_calendar_availability", params, _id, _conversation) do
     days = Map.get(params, "days_ahead", 7)
 
@@ -402,7 +522,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
              Map.get(params, "attendees", [])
            ) do
         {:ok, event} ->
-          "Calendar event created: #{params["title"]}"
+          "Calendar event created: #{params["title"]} on #{params["start_time"]}"
 
         {:error, reason} ->
           "Error creating event: #{inspect(reason)}"
@@ -415,12 +535,13 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
   defp execute_tool(user, "create_hubspot_contact", params, _id, _conversation) do
     case HubspotService.create_contact(
-           user.hubspot_access_token,
+           user,
            params["email"],
            params["first_name"],
            params["last_name"],
            Map.get(params, "phone")
-         ) do
+         )
+         |> IO.inspect() do
       {:ok, contact} ->
         "Contact created in HubSpot: #{params["first_name"]} #{params["last_name"]}"
 
@@ -436,7 +557,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
          _id,
          _conversation
        ) do
-    case HubspotService.add_note_to_contact(user.hubspot_access_token, contact_id, note) do
+    case HubspotService.add_note_to_contact(user, contact_id, note) do
       {:ok, _} ->
         "Note added to contact"
 

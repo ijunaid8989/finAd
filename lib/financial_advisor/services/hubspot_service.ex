@@ -79,7 +79,8 @@ defmodule FinancialAdvisor.Services.HubspotService do
         }
       })
 
-    case make_request(:post, "#{@hubspot_api_url}/crm/v3/objects/contacts", user, body) do
+    case make_request(:post, "#{@hubspot_api_url}/crm/v3/objects/contacts", user, body)
+         |> IO.inspect() do
       {:ok, response_body} ->
         {:ok, Jason.decode!(response_body)}
 
@@ -130,7 +131,7 @@ defmodule FinancialAdvisor.Services.HubspotService do
     ]
 
     case do_request(method, url, body, headers) do
-      {:ok, 200, response_body} ->
+      {:ok, status, response_body} when status in [200, 201] ->
         {:ok, response_body}
 
       {:ok, 401, _} ->
