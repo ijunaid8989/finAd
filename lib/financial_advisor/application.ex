@@ -12,6 +12,7 @@ defmodule FinancialAdvisor.Application do
       FinancialAdvisor.Repo,
       {DNSCluster, query: Application.get_env(:financial_advisor, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: FinancialAdvisor.PubSub},
+      FinancialAdvisor.Scheduler,
       # Start a worker by calling: FinancialAdvisor.Worker.start_link(arg)
       # {FinancialAdvisor.Worker, arg},
       # Start to serve requests, typically the last entry

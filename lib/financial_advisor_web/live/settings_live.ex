@@ -59,14 +59,12 @@ defmodule FinancialAdvisorWeb.SettingsLive do
                   </div>
 
                   <%= if @user.google_id do %>
-                    <form action="/oauth/google/disconnect" method="delete">
-                      <button
-                        type="submit"
-                        class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm"
-                      >
-                        Disconnect
-                      </button>
-                    </form>
+                    <button
+                      phx-click="disconnect_google"
+                      class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm"
+                    >
+                      Disconnect
+                    </button>
                   <% else %>
                     <button
                       phx-click="connect_google"
@@ -92,14 +90,12 @@ defmodule FinancialAdvisorWeb.SettingsLive do
                   </div>
 
                   <%= if @user.hubspot_id do %>
-                    <form action="/oauth/hubspot/disconnect" method="delete">
-                      <button
-                        type="submit"
-                        class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm"
-                      >
-                        Disconnect
-                      </button>
-                    </form>
+                    <button
+                      phx-click="disconnect_hubspot"
+                      class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm"
+                    >
+                      Disconnect
+                    </button>
                   <% else %>
                     <button
                       phx-click="connect_hubspot"
@@ -214,6 +210,28 @@ defmodule FinancialAdvisorWeb.SettingsLive do
   def handle_event("connect_hubspot", _params, socket) do
     url = hubspot_auth_url()
     {:noreply, redirect(socket, external: url)}
+  end
+
+  def handle_event("disconnect_google", _params, socket) do
+    user = socket.assigns.user
+
+    user
+    |> Ecto.Changeset.change(google_access_token: nil, google_refresh_token: nil, google_id: nil)
+    |> Repo.update()
+
+    {:noreply,
+     socket |> put_flash(:info, "Google disconnected") |> assign(user: %{user | google_id: nil})}
+  end
+
+  def handle_event("disconnect_hubspot", _params, socket) do
+    user = socket.assigns.user
+
+    user
+    |> Ecto.Changeset.change(hubspot_access_token: nil, hubspot_id: nil)
+    |> Repo.update()
+
+    {:noreply,
+     socket |> put_flash(:info, "HubSpot disconnected") |> assign(user: %{user | hubspot_id: nil})}
   end
 
   defp google_auth_url do

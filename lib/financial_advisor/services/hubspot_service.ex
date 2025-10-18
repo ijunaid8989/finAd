@@ -21,7 +21,10 @@ defmodule FinancialAdvisor.Services.HubspotService do
 
   def list_contacts(user, limit \\ 100, after_token \\ nil) do
     query_params = %{limit: limit, properties: "firstname,lastname,email,phone"}
-    query_params = if after_token, do: Map.put(query_params, :after, after_token), else: query_params
+
+    query_params =
+      if after_token, do: Map.put(query_params, :after, after_token), else: query_params
+
     query = URI.encode_query(query_params)
 
     case make_request(:get, "#{@hubspot_api_url}/crm/v3/objects/contacts?#{query}", user, nil) do
@@ -37,7 +40,12 @@ defmodule FinancialAdvisor.Services.HubspotService do
   def get_contact(user, contact_id) do
     query = URI.encode_query(%{properties: "firstname,lastname,email,phone"})
 
-    case make_request(:get, "#{@hubspot_api_url}/crm/v3/objects/contacts/#{contact_id}?#{query}", user, nil) do
+    case make_request(
+           :get,
+           "#{@hubspot_api_url}/crm/v3/objects/contacts/#{contact_id}?#{query}",
+           user,
+           nil
+         ) do
       {:ok, response_body} ->
         {:ok, Jason.decode!(response_body)}
 
@@ -60,14 +68,15 @@ defmodule FinancialAdvisor.Services.HubspotService do
   end
 
   def create_contact(user, email, first_name, last_name, phone \\ nil) do
-    body = Jason.encode!(%{
-      properties: %{
-        email: email,
-        firstname: first_name,
-        lastname: last_name,
-        phone: phone
-      }
-    })
+    body =
+      Jason.encode!(%{
+        properties: %{
+          email: email,
+          firstname: first_name,
+          lastname: last_name,
+          phone: phone
+        }
+      })
 
     case make_request(:post, "#{@hubspot_api_url}/crm/v3/objects/contacts", user, body) do
       {:ok, response_body} ->
@@ -81,7 +90,12 @@ defmodule FinancialAdvisor.Services.HubspotService do
   def update_contact(user, contact_id, properties) do
     body = Jason.encode!(%{properties: properties})
 
-    case make_request(:patch, "#{@hubspot_api_url}/crm/v3/objects/contacts/#{contact_id}", user, body) do
+    case make_request(
+           :patch,
+           "#{@hubspot_api_url}/crm/v3/objects/contacts/#{contact_id}",
+           user,
+           body
+         ) do
       {:ok, response_body} ->
         {:ok, Jason.decode!(response_body)}
 
@@ -91,12 +105,13 @@ defmodule FinancialAdvisor.Services.HubspotService do
   end
 
   def add_note_to_contact(user, contact_id, note_text) do
-    body = Jason.encode!(%{
-      engagement: %{active: true, type: "NOTE"},
-      associations: %{contactIds: [contact_id]},
-      attachments: [],
-      metadata: %{body: note_text}
-    })
+    body =
+      Jason.encode!(%{
+        engagement: %{active: true, type: "NOTE"},
+        associations: %{contactIds: [contact_id]},
+        attachments: [],
+        metadata: %{body: note_text}
+      })
 
     case make_request(:post, "#{@hubspot_api_url}/crm/v3/objects/notes", user, body) do
       {:ok, response_body} ->
@@ -129,10 +144,15 @@ defmodule FinancialAdvisor.Services.HubspotService do
   end
 
   defp refresh_and_retry(method, url, user, body) do
-    with {:ok, token_data} <- HubspotOAuth.refresh_token(user.hubspot_access_token),
+    IO.inspect(user)
+
+    with {:ok, token_data} <- HubspotOAuth.refresh_token(user.hubspot_refresh_token),
          new_token = token_data["access_token"],
          {:ok, _} <- update_user_token(user, new_token),
-         headers = [{"Authorization", "Bearer #{new_token}"}, {"Content-Type", "application/json"}],
+         headers = [
+           {"Authorization", "Bearer #{new_token}"},
+           {"Content-Type", "application/json"}
+         ],
          {:ok, 200, response_body} <- do_request(method, url, body, headers) do
       {:ok, response_body}
     else
@@ -174,6 +194,7 @@ defmodule FinancialAdvisor.Services.HubspotService do
 
   defp store_contact(user, contact_data) do
     parsed = parse_contact(contact_data)
+
     HubspotContact.changeset(%HubspotContact{}, Map.merge(parsed, %{user_id: user.id}))
     |> Repo.insert(on_conflict: :nothing)
   end

@@ -117,7 +117,9 @@ defmodule FinancialAdvisor.Services.EmbeddingsService do
           order_by: [desc: fragment("1 - (? <-> ?)", emb.embedding, ^query_embedding)],
           limit: ^limit
         )
+        |> IO.inspect()
         |> Repo.all()
+        |> IO.inspect()
 
       {:ok, emails}
     end

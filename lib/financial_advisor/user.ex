@@ -9,6 +9,7 @@ defmodule FinancialAdvisor.User do
     field :google_access_token, :binary
     field :google_refresh_token, :binary
     field :hubspot_access_token, :binary
+    field :hubspot_refresh_token, :binary
     field :google_calendar_id, :string
     field :settings, :map, default: %{}
 
@@ -37,7 +38,7 @@ defmodule FinancialAdvisor.User do
 
   def hubspot_oauth_changeset(user, attrs) do
     user
-    |> cast(attrs, [:hubspot_access_token, :hubspot_id])
-    |> validate_required([:hubspot_access_token, :hubspot_id])
+    |> cast(attrs, [:hubspot_access_token, :hubspot_id, :hubspot_refresh_token])
+    |> validate_required([:hubspot_access_token, :hubspot_id, :hubspot_refresh_token])
   end
 end

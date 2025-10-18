@@ -355,7 +355,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
   end
 
   defp execute_tool(user, "search_contacts", %{"query" => query}, _id, _conversation) do
-    case HubspotService.search_contacts(user.hubspot_access_token, query) do
+    case HubspotService.search_contacts(user, query) do
       {:ok, results} ->
         format_contact_results(results)
 
@@ -393,8 +393,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
   end
 
   defp execute_tool(user, "create_calendar_event", params, _id, _conversation) do
-    with {:ok, start_dt} <- DateTime.from_iso8601(params["start_time"]),
-         {:ok, end_dt} <- DateTime.from_iso8601(params["end_time"]) do
+    with {:ok, start_dt, _} <- DateTime.from_iso8601(params["start_time"]),
+         {:ok, end_dt, _} <- DateTime.from_iso8601(params["end_time"]) do
       case CalendarService.create_event(
              user,
              params["title"],

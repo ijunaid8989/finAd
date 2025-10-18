@@ -62,11 +62,6 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
-config :financial_advisor, Oban,
-  engine: Oban.Engines.Basic,
-  queues: [default: 10],
-  repo: FinancialAdvisor.Repo
-
 config :financial_advisor, :google,
   client_id: System.get_env("GOOGLE_CLIENT_ID", "YOUR_GOOGLE_CLIENT_ID"),
   client_secret: System.get_env("GOOGLE_CLIENT_SECRET", "YOUR_GOOGLE_CLIENT_SECRET"),

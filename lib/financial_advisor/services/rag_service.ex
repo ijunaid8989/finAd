@@ -77,4 +77,12 @@ defmodule FinancialAdvisor.Services.RAGService do
     end)
     |> Enum.join("\n\n")
   end
+
+  def search_emails(user_id, query) do
+    EmbeddingsService.search_emails(user_id, query, 10)
+  end
+
+  def search_contacts(user_id, query) do
+    EmbeddingsService.search_contacts(user_id, query, 5)
+  end
 end

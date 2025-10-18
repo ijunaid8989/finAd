@@ -58,9 +58,15 @@ defmodule FinancialAdvisorWeb.OAuthController do
         else
           with {:ok, token_data} <- HubspotOAuth.get_token(code) |> IO.inspect(),
                access_token = token_data["access_token"],
+               refresh_token = token_data["refresh_token"],
                portal_id = token_data["hub_id"] || "default_hub_id" do
             {:ok, user} =
-              HubspotOAuth.upsert_user_hubspot(current_user, access_token, "#{portal_id}")
+              HubspotOAuth.upsert_user_hubspot(
+                current_user,
+                access_token,
+                "#{portal_id}",
+                refresh_token
+              )
 
             # Sync initial contacts
             Task.start_link(fn ->
@@ -94,10 +100,11 @@ defmodule FinancialAdvisorWeb.OAuthController do
     user = get_session(conn, "current_user")
 
     user
-    |> Ecto.Changeset.change(google_access_token: nil, google_refresh_token: nil)
-    |> Repo.update()
+    |> Ecto.Changeset.change(google_access_token: nil, google_refresh_token: nil, google_id: nil)
+    |> FinancialAdvisor.Repo.update()
 
     conn
+    |> put_session("current_user", nil)
     |> put_flash(:info, "Google disconnected")
     |> redirect(to: ~p"/settings")
   end
@@ -106,10 +113,11 @@ defmodule FinancialAdvisorWeb.OAuthController do
     user = get_session(conn, "current_user")
 
     user
-    |> Ecto.Changeset.change(hubspot_access_token: nil)
-    |> Repo.update()
+    |> Ecto.Changeset.change(hubspot_access_token: nil, hubspot_id: nil)
+    |> FinancialAdvisor.Repo.update()
 
     conn
+    |> put_session("current_user", nil)
     |> put_flash(:info, "HubSpot disconnected")
     |> redirect(to: ~p"/settings")
   end

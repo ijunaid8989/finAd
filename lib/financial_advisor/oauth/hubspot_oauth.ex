@@ -96,10 +96,11 @@ defmodule FinancialAdvisor.OAuth.HubspotOAuth do
     end
   end
 
-  def upsert_user_hubspot(user, access_token, hubspot_id) do
+  def upsert_user_hubspot(user, access_token, hubspot_id, refresh_token) do
     user
     |> User.hubspot_oauth_changeset(%{
       hubspot_access_token: encrypt_token(access_token),
+      hubspot_refresh_token: encrypt_token(refresh_token),
       hubspot_id: hubspot_id
     })
     |> Repo.update()
