@@ -11,6 +11,8 @@ config :financial_advisor,
   ecto_repos: [FinancialAdvisor.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+config :financial_advisor, FinancialAdvisor.Repo, types: FinancialAdvisor.PostgrexTypes
+
 # Configures the endpoint
 config :financial_advisor, FinancialAdvisorWeb.Endpoint,
   url: [host: "localhost"],
@@ -59,6 +61,26 @@ config :logger, :default_formatter,
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
+
+config :financial_advisor, Oban,
+  engine: Oban.Engines.Basic,
+  queues: [default: 10],
+  repo: FinancialAdvisor.Repo
+
+config :financial_advisor, :google,
+  client_id: System.get_env("GOOGLE_CLIENT_ID", "YOUR_GOOGLE_CLIENT_ID"),
+  client_secret: System.get_env("GOOGLE_CLIENT_SECRET", "YOUR_GOOGLE_CLIENT_SECRET"),
+  redirect_uri:
+    System.get_env("GOOGLE_REDIRECT_URI", "http://localhost:4000/oauth/google/callback")
+
+config :financial_advisor, :hubspot,
+  client_id: System.get_env("HUBSPOT_CLIENT_ID", "YOUR_HUBSPOT_CLIENT_ID"),
+  client_secret: System.get_env("HUBSPOT_CLIENT_SECRET", "YOUR_HUBSPOT_CLIENT_SECRET"),
+  redirect_uri:
+    System.get_env("HUBSPOT_REDIRECT_URI", "http://localhost:4000/oauth/hubspot/callback")
+
+config :financial_advisor, :claude,
+  api_key: System.get_env("CLAUDE_API_KEY", "YOUR_CLAUDE_API_KEY")
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

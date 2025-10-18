@@ -17,7 +17,23 @@ defmodule FinancialAdvisorWeb.Router do
   scope "/", FinancialAdvisorWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/login", AuthLive
+    live "/chat", ChatLive
+    live "/chat/:id", ChatLive
+    live "/settings", SettingsLive
+
+    get "/oauth/google/callback", OAuthController, :google_callback
+    get "/oauth/hubspot/callback", OAuthController, :hubspot_callback
+    delete "/oauth/google/disconnect", OAuthController, :google_disconnect
+    delete "/oauth/hubspot/disconnect", OAuthController, :hubspot_disconnect
+  end
+
+  scope "/api", FinancialAdvisorWeb do
+    pipe_through :api
+
+    post "/webhooks/gmail", WebhookController, :gmail
+    post "/webhooks/hubspot", WebhookController, :hubspot
+    post "/webhooks/calendar", WebhookController, :calendar
   end
 
   # Other scopes may use custom stacks.
