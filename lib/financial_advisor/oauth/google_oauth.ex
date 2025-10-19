@@ -142,7 +142,7 @@ defmodule FinancialAdvisor.OAuth.GoogleOAuth do
 
       {:ok, status, response_body} ->
         Logger.error("Google API error: HTTP #{status}")
-        {:error, "HTTP #{status}"}
+        {:error, "HTTP #{status}, #{inspect(response_body)}"}
 
       {:error, reason} ->
         Logger.error("Google API request failed: #{inspect(reason)}")

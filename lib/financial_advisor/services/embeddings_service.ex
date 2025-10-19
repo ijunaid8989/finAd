@@ -7,14 +7,6 @@ defmodule FinancialAdvisor.Services.EmbeddingsService do
   alias FinancialAdvisor.ContactEmbedding
   import Ecto.Query
 
-  @claude_api_url "https://api.anthropic.com/v1/messages"
-
-  def config do
-    %{
-      api_key: System.get_env("CLAUDE_API_KEY", "YOUR_CLAUDE_API_KEY")
-    }
-  end
-
   def embed_email(email) do
     content = "#{email.subject}\n\n#{email.body}"
     content_hash = hash_content(content)

@@ -1,7 +1,6 @@
 defmodule FinancialAdvisor.Services.CalendarService do
   require Logger
   alias FinancialAdvisor.Repo
-  alias FinancialAdvisor.User
   alias FinancialAdvisor.CalendarEvent
   alias FinancialAdvisor.OAuth.GoogleOAuth
 

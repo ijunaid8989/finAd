@@ -4,7 +4,6 @@ defmodule FinancialAdvisorWeb.WebhookController do
   alias FinancialAdvisor.Services.WebhookProcessor
   alias FinancialAdvisor.Repo
   alias FinancialAdvisor.User
-  import Ecto.Query
 
   def gmail(conn, _params) do
     case verify_webhook_signature(conn, "gmail") do
@@ -53,7 +52,7 @@ defmodule FinancialAdvisorWeb.WebhookController do
     end
   end
 
-  defp verify_webhook_signature(conn, _provider) do
+  defp verify_webhook_signature(_conn, _provider) do
     # TODO: Implement webhook signature verification
     # For production, verify the X-HubSpot-Request-Signature header
     # using your webhook signing secret
@@ -77,7 +76,7 @@ defmodule FinancialAdvisorWeb.WebhookController do
     end
   end
 
-  defp verify_webhook_signature(conn, provider) do
+  defp verify_webhook_signature(_conn, _provider) do
     # TODO: Implement webhook signature verification based on provider
     true
   end

@@ -38,7 +38,7 @@ defmodule FinancialAdvisor.Services.TaskProcessor do
     end
   end
 
-  defp execute_task(task) do
+  defp execute_task(_task) do
     # Execute based on task metadata and stored tool calls
     {:ok, %{status: "completed"}}
   end

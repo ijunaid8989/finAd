@@ -1,18 +1,14 @@
 defmodule FinancialAdvisor.Services.AIAgent do
   require Logger
   alias FinancialAdvisor.Repo
-  alias FinancialAdvisor.User
   alias FinancialAdvisor.Conversation
-  alias FinancialAdvisor.Task
   alias FinancialAdvisor.OngoingInstruction
 
   alias FinancialAdvisor.Services.{
     RAGService,
     GmailService,
     CalendarService,
-    HubspotService,
-    SearchHelper,
-    TaskManager
+    HubspotService
   }
 
   import Ecto.Query
@@ -404,7 +400,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
     end
   end
 
-  defp handle_claude_response(user, response, conversation, messages) do
+  defp handle_claude_response(user, response, conversation, _messages) do
     case Jason.decode(response.body) do
       {:ok, data} ->
         content = data["content"] || []
@@ -436,7 +432,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
     end
   end
 
-  defp process_content_blocks(content, user) do
+  defp process_content_blocks(content, _user) do
     Enum.reduce(content, {[], ""}, fn block, {tool_calls, text} ->
       case block do
         %{"type" => "text", "text" => text_content} ->
@@ -478,10 +474,6 @@ defmodule FinancialAdvisor.Services.AIAgent do
     end
   end
 
-  defp execute_tool(user, "get_contact_context", %{"email" => email}, _id, _conversation) do
-    SearchHelper.get_contact_context(user.id, email)
-  end
-
   defp execute_tool(user, "get_calendar_availability", params, _id, _conversation) do
     days = Map.get(params, "days_ahead", 7)
 
@@ -521,7 +513,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
              end_dt,
              Map.get(params, "attendees", [])
            ) do
-        {:ok, event} ->
+        {:ok, _event} ->
           "Calendar event created: #{params["title"]} on #{params["start_time"]}"
 
         {:error, reason} ->
@@ -540,9 +532,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
            params["first_name"],
            params["last_name"],
            Map.get(params, "phone")
-         )
-         |> IO.inspect() do
-      {:ok, contact} ->
+         ) do
+      {:ok, _contact} ->
         "Contact created in HubSpot: #{params["first_name"]} #{params["last_name"]}"
 
       {:error, reason} ->

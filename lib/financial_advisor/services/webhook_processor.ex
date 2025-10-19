@@ -2,8 +2,6 @@ defmodule FinancialAdvisor.Services.WebhookProcessor do
   require Logger
   alias FinancialAdvisor.Repo
   alias FinancialAdvisor.WebhookLog
-  alias FinancialAdvisor.Services.AIAgent
-  import Ecto.Query
 
   def process_webhook(user_id, provider, event_type, payload) do
     webhook_log =
@@ -31,19 +29,19 @@ defmodule FinancialAdvisor.Services.WebhookProcessor do
     end
   end
 
-  defp process_event(_user_id, "gmail", "message_received", payload) do
+  defp process_event(_user_id, "gmail", "message_received", _payload) do
     # Handle incoming email - trigger ongoing instructions check
     Logger.info("New email received")
     :ok
   end
 
-  defp process_event(_user_id, "hubspot", "contact_created", payload) do
+  defp process_event(_user_id, "hubspot", "contact_created", _payload) do
     # Handle contact creation - trigger ongoing instructions check
     Logger.info("New contact created in HubSpot")
     :ok
   end
 
-  defp process_event(_user_id, "calendar", "event_created", payload) do
+  defp process_event(_user_id, "calendar", "event_created", _payload) do
     # Handle calendar event - trigger ongoing instructions check
     Logger.info("New calendar event created")
     :ok

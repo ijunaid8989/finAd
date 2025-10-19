@@ -9,7 +9,6 @@ defmodule FinancialAdvisor.Scheduler do
     CalendarService,
     HubspotService,
     EmbeddingsService,
-    WebhookProcessor,
     TaskProcessor
   }
 

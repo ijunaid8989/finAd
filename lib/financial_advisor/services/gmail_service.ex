@@ -1,7 +1,6 @@
 defmodule FinancialAdvisor.Services.GmailService do
   require Logger
   alias FinancialAdvisor.Repo
-  alias FinancialAdvisor.User
   alias FinancialAdvisor.Email
   alias FinancialAdvisor.OAuth.GoogleOAuth
   alias FinancialAdvisor.Services.EmbeddingsService

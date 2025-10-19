@@ -3,11 +3,10 @@ defmodule FinancialAdvisorWeb.OAuthController do
   require Logger
   alias FinancialAdvisor.OAuth.{GoogleOAuth, HubspotOAuth, StateManager}
   alias FinancialAdvisor.Services.{GmailService, CalendarService, HubspotService}
-  alias FinancialAdvisor.Repo
 
   def google_callback(conn, %{"code" => code, "state" => state}) do
     case StateManager.verify_state(state, "google") do
-      {:ok, oauth_state} ->
+      {:ok, _oauth_state} ->
         StateManager.consume_state(state)
 
         with {:ok, token_data} <- GoogleOAuth.get_token(code),
@@ -47,7 +46,7 @@ defmodule FinancialAdvisorWeb.OAuthController do
 
   def hubspot_callback(conn, %{"code" => code, "state" => state}) do
     case StateManager.verify_state(state, "hubspot") do
-      {:ok, oauth_state} ->
+      {:ok, _oauth_state} ->
         StateManager.consume_state(state)
         current_user = get_session(conn, "current_user")
 

@@ -125,6 +125,8 @@ defmodule FinancialAdvisor.Services.HubspotService do
   end
 
   defp make_request(method, url, user, body) do
+    user = Repo.reload(user)
+
     headers = [
       {"Authorization", "Bearer #{user.hubspot_access_token}"},
       {"Content-Type", "application/json"}
@@ -170,6 +172,7 @@ defmodule FinancialAdvisor.Services.HubspotService do
     user
     |> Ecto.Changeset.change(hubspot_access_token: new_token)
     |> Ecto.Changeset.change(hubspot_refresh_token: refresh_token)
+    |> IO.inspect()
     |> Repo.update()
   end
 
