@@ -12,6 +12,7 @@ defmodule FinancialAdvisor.CalendarEvent do
     field :metadata, :map, default: %{}
 
     belongs_to :user, FinancialAdvisor.User
+    has_many :email_logs, FinancialAdvisor.CalendarEventEmailLog
 
     timestamps()
   end

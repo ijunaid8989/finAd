@@ -20,7 +20,8 @@ defmodule FinancialAdvisor.Scheduler do
 
   @impl true
   def init(_opts) do
-    schedule_work()
+    schedule_sync_work()
+    schedule_event_polling()
     {:ok, %{}}
   end
 
@@ -33,7 +34,17 @@ defmodule FinancialAdvisor.Scheduler do
     |> Repo.all()
     |> Enum.each(&sync_user_data/1)
 
-    schedule_work()
+    schedule_sync_work()
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:poll_events, state) do
+    Logger.info("Starting Google Calendar event polling...")
+
+    CalendarService.poll_new_events()
+
+    schedule_event_polling()
     {:noreply, state}
   end
 
@@ -54,7 +65,7 @@ defmodule FinancialAdvisor.Scheduler do
       sync_email_embeddings(user)
     end
 
-    # Sync Calendar
+    # Sync Calendar (legacy - historical events)
     if user.google_access_token do
       case CalendarService.sync_events(user) do
         count when is_integer(count) ->
@@ -111,7 +122,13 @@ defmodule FinancialAdvisor.Scheduler do
     |> Enum.each(&EmbeddingsService.embed_contact/1)
   end
 
-  defp schedule_work do
+  # Schedule sync every 5 minutes
+  defp schedule_sync_work do
     Process.send_after(self(), :sync_data, 5 * 60 * 1000)
+  end
+
+  # Schedule event polling every 2 minutes for real-time event detection
+  defp schedule_event_polling do
+    Process.send_after(self(), :poll_events, 2 * 60 * 1000)
   end
 end
