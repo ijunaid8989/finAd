@@ -96,7 +96,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
       %{
         name: "schedule_appointment",
         description:
-          "Schedule an appointment with a contact. This will: 1) Look up the contact, 2) Send them an email with available times, 3) Create a task that waits for their response, 4) When they respond, automatically create the calendar event. Use this when the user wants to schedule a meeting but hasn't confirmed a specific time yet. If a specific time is already confirmed, use create_calendar_event instead.",
+          "Schedule an appointment with a contact. This will: 1) Look up the contact, 2) Send them an email with available times, 3) Create a task that waits for their response, 4) When they respond, automatically create the calendar event. Use this when the user wants to schedule a meeting but hasn't confirmed a specific time yet. If a specific time is already confirmed, use create_calendar_event instead. Be proactive - if the user doesn't specify a title, use a default like 'Meeting with [Contact Name]'. If they don't specify duration, default to 1 hour.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -110,7 +110,7 @@ defmodule FinancialAdvisor.Services.AIAgent do
             },
             title: %{
               type: "string",
-              description: "Meeting/appointment title"
+              description: "Meeting/appointment title (if not provided, use 'Meeting with [Contact Name]')"
             },
             description: %{
               type: "string",
@@ -118,10 +118,10 @@ defmodule FinancialAdvisor.Services.AIAgent do
             },
             duration_hours: %{
               type: "number",
-              description: "Duration of the meeting in hours (default: 1)"
+              description: "Duration of the meeting in hours (default: 1 if not specified)"
             }
           },
-          required: ["contact_name", "title"]
+          required: ["contact_name"]
         }
       },
       %{
@@ -572,6 +572,11 @@ defmodule FinancialAdvisor.Services.AIAgent do
     3. Remember and execute ongoing instructions
     4. Use tool calling to interact with Gmail, Google Calendar, and HubSpot
     5. Be proactive in searching for context before taking actions
+    6. When scheduling appointments, be proactive and use sensible defaults:
+       - If user says "Schedule appointment with [Name]", use "Meeting with [Name]" as the title
+       - Default duration is 1 hour unless specified
+       - Don't ask for details unless absolutely necessary - proceed with defaults
+       - Only ask for clarification if the request is truly ambiguous
 
     ## When Creating Calendar Events:
     - ALWAYS use ISO8601 format: YYYY-MM-DDTHH:MM:SSZ
@@ -885,7 +890,8 @@ defmodule FinancialAdvisor.Services.AIAgent do
     # Extract parameters
     contact_name = params["contact_name"] || ""
     contact_email = params["contact_email"]
-    title = params["title"] || "Meeting"
+    # Use default title if not provided
+    title = params["title"] || "Meeting with #{contact_name}"
     description = params["description"] || ""
     duration_hours = params["duration_hours"] || 1
 
