@@ -5,13 +5,13 @@ defmodule FinancialAdvisorWeb.ChatLive do
   alias FinancialAdvisor.Repo
   alias FinancialAdvisor.Conversation
 
-  def mount(_params, session, socket) do
+  def mount(params, session, socket) do
     user = session["current_user"]
 
     unless user do
       {:ok, redirect(socket, to: ~p"/login")}
     else
-      conversation_id = session["conversation_id"]
+      conversation_id = params["id"] || session["conversation_id"]
 
       conversation =
         if conversation_id do

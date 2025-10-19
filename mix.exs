@@ -70,7 +70,6 @@ defmodule FinancialAdvisor.MixProject do
       {:elixir_uuid, "~> 1.2"},
       {:joken, "~> 2.6"},
       {:cors_plug, "~> 3.0"},
-      {:oban, "~> 2.17"},
       {:quantum, "~> 3.5"},
       {:pgvector, "~> 0.3.0"},
       {:timex, "~> 3.7"}
