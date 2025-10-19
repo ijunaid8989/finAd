@@ -39,51 +39,94 @@ defmodule FinancialAdvisor.OAuth.GoogleOAuth do
   end
 
   def get_token(code) do
-    case HTTPoison.post(
-           @google_token_url,
-           encode_body(%{
-             code: code,
-             client_id: config().client_id,
-             client_secret: config().client_secret,
-             redirect_uri: config().redirect_uri,
-             grant_type: "authorization_code"
-           })
-         ) do
-      {:ok, response} ->
-        response.body
-        |> Jason.decode!()
-        |> case do
-          %{"error" => error} -> {:error, error}
-          data -> {:ok, data}
+    # Google OAuth token endpoint expects form-encoded data, not JSON
+    body =
+      URI.encode_query(%{
+        code: code,
+        client_id: config().client_id,
+        client_secret: config().client_secret,
+        redirect_uri: config().redirect_uri,
+        grant_type: "authorization_code"
+      })
+
+    headers = [{"Content-Type", "application/x-www-form-urlencoded"}]
+
+    case HTTPoison.post(@google_token_url, body, headers) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: response_body}} ->
+        case Jason.decode(response_body) do
+          {:ok, %{"error" => error, "error_description" => description}} ->
+            Logger.error("Google token exchange error: #{error} - #{description}")
+            {:error, "#{error}: #{description}"}
+
+          {:ok, data} ->
+            {:ok, data}
+
+          {:error, reason} ->
+            Logger.error("Failed to decode token response: #{inspect(reason)}")
+            {:error, "Invalid response format"}
+        end
+
+      {:ok, %HTTPoison.Response{status_code: status, body: response_body}} ->
+        Logger.error("Google token exchange failed: HTTP #{status}, #{response_body}")
+        case Jason.decode(response_body) do
+          {:ok, %{"error" => error, "error_description" => description}} ->
+            {:error, "#{error}: #{description}"}
+
+          _ ->
+            {:error, "HTTP #{status}"}
         end
 
       {:error, reason} ->
-        Logger.error("Google token exchange failed: #{inspect(reason)}")
+        Logger.error("Google token exchange request failed: #{inspect(reason)}")
         {:error, reason}
     end
   end
 
   def refresh_token(refresh_token) do
-    case HTTPoison.post(
-           @google_token_url,
-           encode_body(%{
-             client_id: config().client_id,
-             client_secret: config().client_secret,
-             refresh_token: refresh_token,
-             grant_type: "refresh_token"
-           })
-         ) do
-      {:ok, response} ->
-        response.body
-        |> Jason.decode!()
-        |> case do
-          %{"error" => error} -> {:error, error}
-          data -> {:ok, data}
-        end
+    unless refresh_token do
+      Logger.error("Refresh token is nil")
+      {:error, "No refresh token available"}
+    else
+      # Google OAuth token endpoint expects form-encoded data, not JSON
+      body =
+        URI.encode_query(%{
+          client_id: config().client_id,
+          client_secret: config().client_secret,
+          refresh_token: refresh_token,
+          grant_type: "refresh_token"
+        })
 
-      {:error, reason} ->
-        Logger.error("Google token refresh failed: #{inspect(reason)}")
-        {:error, reason}
+      headers = [{"Content-Type", "application/x-www-form-urlencoded"}]
+
+      case HTTPoison.post(@google_token_url, body, headers) do
+        {:ok, %HTTPoison.Response{status_code: 200, body: response_body}} ->
+          case Jason.decode(response_body) do
+            {:ok, %{"error" => error, "error_description" => description}} ->
+              Logger.error("Google token refresh error: #{error} - #{description}")
+              {:error, "#{error}: #{description}"}
+
+            {:ok, data} ->
+              {:ok, data}
+
+            {:error, reason} ->
+              Logger.error("Failed to decode refresh token response: #{inspect(reason)}")
+              {:error, "Invalid response format"}
+          end
+
+        {:ok, %HTTPoison.Response{status_code: status, body: response_body}} ->
+          Logger.error("Google token refresh failed: HTTP #{status}, #{response_body}")
+          case Jason.decode(response_body) do
+            {:ok, %{"error" => error, "error_description" => description}} ->
+              {:error, "#{error}: #{description}"}
+
+            _ ->
+              {:error, "HTTP #{status}"}
+          end
+
+        {:error, reason} ->
+          Logger.error("Google token refresh request failed: #{inspect(reason)}")
+          {:error, reason}
+      end
     end
   end
 
@@ -128,8 +171,11 @@ defmodule FinancialAdvisor.OAuth.GoogleOAuth do
   Returns {:ok, status_code, response_body} or {:error, reason}
   """
   def make_request(method, url, user, body \\ nil, headers \\ []) do
+    # Decrypt the access token before using it
+    access_token = decrypt_token(user.google_access_token)
+
     headers = [
-      {"Authorization", "Bearer #{user.google_access_token}"},
+      {"Authorization", "Bearer #{access_token}"},
       {"Content-Type", "application/json"} | headers
     ]
 
@@ -151,10 +197,14 @@ defmodule FinancialAdvisor.OAuth.GoogleOAuth do
   end
 
   defp refresh_and_retry(method, url, user, body, _headers) do
-    with {:ok, token_data} <- refresh_token(user.google_refresh_token),
+    # Decrypt the refresh token before using it
+    decrypted_refresh_token = decrypt_token(user.google_refresh_token)
+
+    with {:ok, token_data} <- refresh_token(decrypted_refresh_token),
          new_access_token = token_data["access_token"],
-         refresh_token = token_data["refresh_token"],
-         {:ok, _} <- update_user_token(user, new_access_token, refresh_token),
+         # Google may not return a new refresh_token if the old one is still valid
+         new_refresh_token = token_data["refresh_token"] || decrypted_refresh_token,
+         {:ok, _} <- update_user_token(user, new_access_token, new_refresh_token),
          headers = [
            {"Authorization", "Bearer #{new_access_token}"},
            {"Content-Type", "application/json"}
@@ -200,13 +250,20 @@ defmodule FinancialAdvisor.OAuth.GoogleOAuth do
     end
   end
 
-  defp encrypt_token(token) do
+  defp encrypt_token(token) when is_binary(token) do
     # TODO: Implement encryption/decryption with your key management service
+    # For now, tokens are stored as-is (no encryption)
     token
   end
 
-  defp encode_body(params) do
-    params
-    |> Jason.encode!()
+  defp encrypt_token(nil), do: nil
+
+  defp decrypt_token(token) when is_binary(token) do
+    # TODO: Implement decryption with your key management service
+    # For now, tokens are stored as-is (no decryption needed)
+    token
   end
+
+  defp decrypt_token(nil), do: nil
+
 end
