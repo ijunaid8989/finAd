@@ -92,6 +92,9 @@ defmodule FinancialAdvisor.Scheduler do
 
     # Process pending tasks
     TaskProcessor.process_pending_tasks()
+
+    # Check for email responses to waiting tasks
+    TaskProcessor.process_waiting_tasks()
   end
 
   defp sync_email_embeddings(user) do

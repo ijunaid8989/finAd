@@ -5,11 +5,13 @@ defmodule FinancialAdvisor.Services.AIAgent do
   alias FinancialAdvisor.OngoingInstruction
   alias FinancialAdvisor.Email
 
+  alias FinancialAdvisor.Task
   alias FinancialAdvisor.Services.{
     RAGService,
     GmailService,
     CalendarService,
-    HubspotService
+    HubspotService,
+    TaskProcessor
   }
 
   import Ecto.Query
@@ -92,9 +94,40 @@ defmodule FinancialAdvisor.Services.AIAgent do
         }
       },
       %{
+        name: "schedule_appointment",
+        description:
+          "Schedule an appointment with a contact. This will: 1) Look up the contact, 2) Send them an email with available times, 3) Create a task that waits for their response, 4) When they respond, automatically create the calendar event. Use this when the user wants to schedule a meeting but hasn't confirmed a specific time yet. If a specific time is already confirmed, use create_calendar_event instead.",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            contact_name: %{
+              type: "string",
+              description: "Name of the contact to schedule with (e.g., 'Sara Smith')"
+            },
+            contact_email: %{
+              type: "string",
+              description: "Email address of the contact (optional if contact_name is provided and contact can be found)"
+            },
+            title: %{
+              type: "string",
+              description: "Meeting/appointment title"
+            },
+            description: %{
+              type: "string",
+              description: "Meeting description or agenda (optional)"
+            },
+            duration_hours: %{
+              type: "number",
+              description: "Duration of the meeting in hours (default: 1)"
+            }
+          },
+          required: ["contact_name", "title"]
+        }
+      },
+      %{
         name: "create_calendar_event",
         description:
-          "Create a calendar event. IMPORTANT: Use ISO8601 format for times. Examples: 2025-10-21T14:00:00Z (next Tuesday 2PM UTC), 2025-10-22T21:00:00Z (next Wednesday 9PM UTC)",
+          "Create a calendar event immediately when a specific time is already confirmed. IMPORTANT: Use ISO8601 format for times. Examples: 2025-10-21T14:00:00Z (next Tuesday 2PM UTC), 2025-10-22T21:00:00Z (next Wednesday 9PM UTC). Use this when the user has already confirmed a specific date and time. If you need to coordinate with someone to find a time, use schedule_appointment instead.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -279,6 +312,183 @@ defmodule FinancialAdvisor.Services.AIAgent do
       {:error, reason} ->
         Logger.error("Failed to prepare chat: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  # Proactive agent - triggered by webhooks/events
+  def handle_proactive_event(user, event_type, event_data, trigger_type \\ nil) do
+    Logger.info("Proactive agent triggered: #{event_type} for user #{user.id}")
+
+    # Get ongoing instructions for this trigger type
+    trigger = trigger_type || map_event_type_to_trigger(event_type)
+    instructions = get_active_instructions_by_trigger(user.id, trigger)
+
+    # Build context for the event
+    event_context = build_event_context(user, event_type, event_data)
+
+    # Build proactive prompt
+    proactive_prompt = build_proactive_prompt(event_type, event_data, event_context, instructions)
+
+    # Create or get system conversation for proactive actions
+    conversation = get_or_create_system_conversation(user)
+
+    # Get RAG context if needed
+    rag_context =
+      case RAGService.get_context_for_query(user.id, event_context) do
+        {:ok, context} -> context
+        _ -> "No additional context found."
+      end
+
+    messages = build_proactive_message_history(conversation, proactive_prompt, rag_context, instructions)
+
+    # Execute proactive action with tool calling
+    case chat_with_tools(user, messages, conversation, 0) do
+      {:ok, response} ->
+        Logger.info("Proactive agent completed: #{response}")
+        {:ok, response}
+
+      {:error, reason} ->
+        Logger.error("Proactive agent failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp map_event_type_to_trigger("email_received"), do: "email_received"
+  defp map_event_type_to_trigger("contact_created"), do: "contact_created"
+  defp map_event_type_to_trigger("event_created"), do: "calendar_event"
+  defp map_event_type_to_trigger(_), do: "manual"
+
+  defp get_active_instructions_by_trigger(user_id, trigger_type) do
+    OngoingInstruction
+    |> where([oi], oi.user_id == ^user_id and oi.status == "active")
+    |> where([oi], oi.trigger_type == ^trigger_type or oi.trigger_type == "manual")
+    |> Repo.all()
+  end
+
+  defp build_event_context(_user, "email_received", payload) do
+    email_from = payload["from"] || payload["emailAddress"] || "unknown"
+    email_subject = payload["subject"] || "No subject"
+    email_body = payload["body"] || payload["snippet"] || ""
+
+    """
+    New email received:
+    - From: #{email_from}
+    - Subject: #{email_subject}
+    - Body: #{String.slice(email_body, 0, 500)}
+    """
+  end
+
+  defp build_event_context(user, "contact_created", payload) do
+    contact_id = payload["objectId"] || payload["contact_id"] || "unknown"
+    _portal_id = payload["portalId"] || user.hubspot_id
+
+    case HubspotService.get_contact(user, contact_id) do
+      {:ok, contact} ->
+        props = contact["properties"] || %{}
+        """
+        New contact created in HubSpot:
+        - Name: #{props["firstname"] || ""} #{props["lastname"] || ""}
+        - Email: #{props["email"] || "No email"}
+        - Contact ID: #{contact_id}
+        """
+
+      _ ->
+        "New contact created in HubSpot (ID: #{contact_id})"
+    end
+  end
+
+  defp build_event_context(_user, "event_created", payload) do
+    event_title = payload["summary"] || payload["title"] || "Untitled Event"
+    event_start = payload["start"] || payload["start_time"] || "Unknown time"
+
+    """
+    New calendar event created:
+    - Title: #{event_title}
+    - Start: #{event_start}
+    """
+  end
+
+  defp build_event_context(_user, _event_type, _payload) do
+    "Event occurred"
+  end
+
+  defp build_proactive_prompt(_event_type, _event_data, event_context, instructions) do
+    instructions_text =
+      if Enum.empty?(instructions) do
+        "No specific ongoing instructions for this event type."
+      else
+        instructions
+        |> Enum.map(&"- #{&1.instruction}")
+        |> Enum.join("\n")
+      end
+
+    """
+    An event has occurred that may require action:
+
+    #{event_context}
+
+    ## Active Ongoing Instructions:
+    #{instructions_text}
+
+    Review this event and determine if any action should be taken based on the ongoing instructions.
+    Use the available tools to:
+    - Create contacts if email is from someone not in HubSpot
+    - Send emails if needed
+    - Add notes to contacts
+    - Schedule follow-ups
+    - Take any other appropriate actions
+
+    Be proactive but only take actions that are clearly warranted by the ongoing instructions or the event context.
+    If no action is needed, simply acknowledge the event.
+    """
+  end
+
+  defp build_proactive_message_history(_conversation, prompt, rag_context, instructions) do
+    now = DateTime.utc_now()
+    current_date = DateTime.to_date(now)
+
+    system_prompt = """
+    You are a proactive AI assistant for a Financial Advisor. You monitor events (emails, contacts, calendar) and take actions based on ongoing instructions.
+
+    Current Date/Time: #{DateTime.to_iso8601(now)}
+    Today: #{Calendar.strftime(current_date, "%B %d, %Y")}
+
+    ## Relevant Context:
+    #{rag_context}
+
+    ## Active Ongoing Instructions:
+    #{format_instructions(instructions)}
+
+    When an event occurs, review it against the ongoing instructions and take appropriate action using the available tools.
+    """
+
+    [
+      %{"role" => "user", "content" => system_prompt},
+      %{"role" => "user", "content" => prompt}
+    ]
+  end
+
+  defp get_or_create_system_conversation(user) do
+    # Use a special conversation for proactive actions
+    # Could also create a new one each time, but reusing is better for context
+    case Repo.one(
+           from(c in Conversation,
+             where: c.user_id == ^user.id,
+             where: fragment("?->>'role' = ?", c.context, "system"),
+             limit: 1
+           )
+         ) do
+      nil ->
+        Conversation.changeset(%Conversation{}, %{
+          user_id: user.id,
+          messages: [],
+          context: %{role: "system", type: "proactive"},
+          title: "System Proactive Actions"
+        })
+        |> Repo.insert!()
+
+      conversation ->
+        conversation
     end
   end
 
@@ -668,6 +878,69 @@ defmodule FinancialAdvisor.Services.AIAgent do
 
       {:error, reason} ->
         "Error sending email: #{inspect(reason)}"
+    end
+  end
+
+  defp execute_tool(user, "schedule_appointment", params, _id, conversation) do
+    # Extract parameters
+    contact_name = params["contact_name"] || ""
+    contact_email = params["contact_email"]
+    title = params["title"] || "Meeting"
+    description = params["description"] || ""
+    duration_hours = params["duration_hours"] || 1
+
+    # Find contact if email not provided
+    contact_email =
+      if contact_email do
+        contact_email
+      else
+        # Search for contact by name
+        case HubspotService.search_contacts(user, contact_name) do
+          {:ok, [contact | _]} ->
+            contact["properties"]["email"] || contact["properties"]["Email"]
+
+          _ ->
+            nil
+        end
+      end
+
+    if contact_email do
+      # Create a task for scheduling appointment
+      task_attrs = %{
+        user_id: user.id,
+        conversation_id: conversation && conversation.id,
+        title: "Schedule appointment: #{title} with #{contact_name}",
+        description: description,
+        status: "pending",
+        tool_calls: [
+          %{
+            "name" => "schedule_appointment",
+            "input" => params
+          }
+        ],
+        metadata: %{
+          type: "schedule_appointment",
+          contact_name: contact_name,
+          contact_email: contact_email,
+          title: title,
+          description: description,
+          duration_hours: duration_hours
+        }
+      }
+
+      case Task.changeset(%Task{}, task_attrs) |> Repo.insert() do
+        {:ok, _task} ->
+          # Process the task immediately to send the email
+          # This will trigger the workflow: send email → wait for response → create event
+          TaskProcessor.process_pending_tasks()
+
+          "Appointment scheduling task created. I've sent an email to #{contact_email} with available times. I'll create the calendar event once they respond with their preferred time."
+
+        {:error, changeset} ->
+          "Error creating scheduling task: #{inspect(changeset.errors)}"
+      end
+    else
+      "Could not find contact '#{contact_name}'. Please provide an email address or ensure the contact exists in HubSpot."
     end
   end
 
