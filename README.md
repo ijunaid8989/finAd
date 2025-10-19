@@ -177,7 +177,7 @@ A sophisticated Elixir/Phoenix application that orchestrates Gmail, Google Calen
 
 - **Language**: Elixir 1.14+
 - **Framework**: Phoenix 1.7+ with LiveView
-- **Database**: PostgreSQL with pgvector extension
+- **Database**: PostgreSQL with pgvector extension install through this https://github.com/pgvector/pgvector
 - **External APIs**: Google APIs (Gmail, Calendar), HubSpot, Claude AI
 - **Authentication**: OAuth2
 - **Background Jobs**: GenServer-based scheduling
