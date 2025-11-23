@@ -410,7 +410,9 @@ defmodule FinancialAdvisorWeb.ChatLive do
       Task.async(fn ->
         case FinancialAdvisor.Services.GmailService.sync_emails(user, 100) do
           count when is_integer(count) ->
-            send(self(), {:sync_complete, :emails, {:ok, "Synced #{count} emails"}})
+            # After syncing emails, check for task responses
+            FinancialAdvisor.Services.EmailMonitorService.check_for_task_responses(user.id)
+            send(self(), {:sync_complete, :emails, {:ok, "Synced #{count} emails and checked for task responses"}})
 
           {:error, reason} ->
             send(self(), {:sync_complete, :emails, {:error, "Failed to sync: #{inspect(reason)}"}})

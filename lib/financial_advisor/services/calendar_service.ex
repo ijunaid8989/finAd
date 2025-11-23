@@ -244,14 +244,28 @@ defmodule FinancialAdvisor.Services.CalendarService do
         }
       })
 
+    # Use sendUpdates=all query parameter to have Google Calendar send invites automatically
+    url = "#{@calendar_api_url}/#{calendar_id}/events?sendUpdates=all"
+
     case GoogleOAuth.make_request(
            :post,
-           "#{@calendar_api_url}/#{calendar_id}/events",
+           url,
            user,
            body
          ) do
       {:ok, response_body} ->
-        response_body |> Jason.decode!() |> (&{:ok, &1}).()
+        event_data = response_body |> Jason.decode!()
+
+        Logger.info("Calendar event created: #{title} with #{length(attendees)} attendees. Google Calendar will send invites automatically.")
+
+        # Store event locally for tracking
+        case store_event_and_notify(user, event_data) do
+          {:ok, _event} ->
+            {:ok, event_data}
+          {:error, reason} ->
+            Logger.warning("Event created in Google Calendar but failed to store locally: #{inspect(reason)}")
+            {:ok, event_data} # Still return success since Google Calendar has the event
+        end
 
       {:error, reason} ->
         Logger.error("Failed to create calendar event: #{inspect(reason)}")

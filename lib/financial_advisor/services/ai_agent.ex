@@ -902,8 +902,25 @@ defmodule FinancialAdvisor.Services.AIAgent do
       else
         # Search for contact by name
         case HubspotService.search_contacts(user, contact_name) do
-          {:ok, [contact | _]} ->
-            contact["properties"]["email"] || contact["properties"]["Email"]
+          {:ok, []} ->
+            nil
+
+          {:ok, contacts} ->
+            # Find the best match - prefer exact name match
+            exact_match =
+              Enum.find(contacts, fn contact ->
+                props = contact["properties"] || %{}
+                full_name =
+                  "#{props["firstname"] || ""} #{props["lastname"] || ""}" |> String.trim()
+                    |> String.downcase()
+
+                search_name = String.downcase(contact_name)
+                full_name == search_name || String.contains?(full_name, search_name)
+              end)
+
+            contact = exact_match || List.first(contacts)
+            props = contact["properties"] || %{}
+            props["email"] || props["Email"]
 
           _ ->
             nil
@@ -935,12 +952,26 @@ defmodule FinancialAdvisor.Services.AIAgent do
       }
 
       case Task.changeset(%Task{}, task_attrs) |> Repo.insert() do
-        {:ok, _task} ->
+        {:ok, task} ->
           # Process the task immediately to send the email
-          # This will trigger the workflow: send email → wait for response → create event
-          TaskProcessor.process_pending_tasks()
+          # Reload with user preloaded
+          task_with_user = Repo.preload(task, :user)
+          TaskProcessor.process_task(task_with_user)
 
-          "Appointment scheduling task created. I've sent an email to #{contact_email} with available times. I'll create the calendar event once they respond with their preferred time."
+          # Reload the task to check if email was actually sent
+          updated_task = Repo.reload!(task)
+
+          case updated_task.status do
+            "waiting_for_response" ->
+              "I've sent an email to #{contact_email} with available times. I'll create the calendar event once they respond with their preferred time."
+
+            "failed" ->
+              error_msg = get_in(updated_task.metadata, ["error"]) || "Unknown error"
+              "I tried to schedule the appointment, but encountered an error: #{error_msg}. Please check your Google account connection and try again."
+
+            _ ->
+              "Appointment scheduling task created. Processing email now..."
+          end
 
         {:error, changeset} ->
           "Error creating scheduling task: #{inspect(changeset.errors)}"

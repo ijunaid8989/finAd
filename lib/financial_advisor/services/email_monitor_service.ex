@@ -3,30 +3,61 @@ defmodule FinancialAdvisor.Services.EmailMonitorService do
   alias FinancialAdvisor.Repo
   alias FinancialAdvisor.Task
   alias FinancialAdvisor.Email
+  alias FinancialAdvisor.User
   alias FinancialAdvisor.Services.AIAgent
   import Ecto.Query
 
   # Monitor emails for task responses
+  # This function syncs emails first, then checks for responses
   def check_for_task_responses(user_id) do
-    # Get all tasks waiting for email responses
-    waiting_tasks =
-      Task
-      |> where([t], t.user_id == ^user_id)
-      |> where([t], t.status == "waiting_for_response")
-      |> Repo.all()
+    user = Repo.get(User, user_id)
 
-    # Get recent emails
-    recent_emails =
-      Email
-      |> where([e], e.user_id == ^user_id)
-      |> where([e], e.received_at >= ago(1, "hour"))
-      |> order_by([e], desc: e.received_at)
-      |> Repo.all()
+    if user && user.google_access_token do
+      # Get all tasks waiting for email responses
+      waiting_tasks =
+        Task
+        |> where([t], t.user_id == ^user_id)
+        |> where([t], t.status == "waiting_for_response")
+        |> Repo.all()
 
-    # Check each waiting task for matching emails
-    Enum.each(waiting_tasks, fn task ->
-      check_task_for_responses(task, recent_emails)
-    end)
+      if Enum.empty?(waiting_tasks) do
+        Logger.debug("No waiting tasks for user #{user_id}")
+        :ok
+      else
+        Logger.info("Checking for responses to #{length(waiting_tasks)} waiting tasks for user #{user_id}")
+
+        # IMPORTANT: Sync emails first to get the latest responses
+        Logger.info("Syncing emails for user #{user_id} before checking task responses...")
+        case FinancialAdvisor.Services.GmailService.sync_emails(user, 50) do
+          count when is_integer(count) ->
+            Logger.info("Synced #{count} emails for user #{user_id}")
+
+          {:error, reason} ->
+            Logger.error("Failed to sync emails for user #{user_id}: #{inspect(reason)}")
+            # Continue anyway with existing emails
+        end
+
+        # Get recent emails (check last 24 hours to catch any missed emails)
+        recent_emails =
+          Email
+          |> where([e], e.user_id == ^user_id)
+          |> where([e], e.received_at >= ago(24, "hour"))
+          |> order_by([e], desc: e.received_at)
+          |> Repo.all()
+
+        Logger.info("Found #{length(recent_emails)} recent emails to check")
+
+        # Check each waiting task for matching emails
+        Enum.each(waiting_tasks, fn task ->
+          check_task_for_responses(task, recent_emails)
+        end)
+
+        :ok
+      end
+    else
+      Logger.warning("User #{user_id} not found or no Google access token")
+      :ok
+    end
   end
 
   defp check_task_for_responses(task, recent_emails) do
@@ -48,24 +79,68 @@ defmodule FinancialAdvisor.Services.EmailMonitorService do
   end
 
   defp matches_task?(email, expected_from, expected_subject_keywords) do
+    # Match by sender email (case-insensitive, partial match)
     from_match =
       if expected_from do
-        String.contains?(String.downcase(email.from || ""), String.downcase(expected_from))
+        email_from = String.downcase(email.from || "")
+        expected_from_lower = String.downcase(expected_from)
+        # Check if email is from the expected sender or contains the expected email
+        String.contains?(email_from, expected_from_lower) ||
+          String.contains?(expected_from_lower, email_from)
       else
         true
       end
 
+    # Match by subject keywords (more flexible - any keyword match is enough)
     subject_match =
       if Enum.any?(expected_subject_keywords) do
         email_subject = String.downcase(email.subject || "")
+        # Check if subject contains any of the keywords
         Enum.any?(expected_subject_keywords, fn keyword ->
-          String.contains?(email_subject, String.downcase(keyword))
+          keyword_lower = String.downcase(keyword)
+          String.contains?(email_subject, keyword_lower)
         end)
+      else
+        # If no keywords specified, match any email from the expected sender
+        true
+      end
+
+    # Also check email body for scheduling-related keywords if subject doesn't match
+    # Look for date/time patterns, confirmation words, etc.
+    body_match =
+      if not subject_match do
+        email_body = String.downcase(email.body || "")
+
+        # Check for date/time patterns
+        date_time_patterns = [
+          "wednesday", "thursday", "friday", "monday", "tuesday", "saturday", "sunday",
+          "november", "december", "january", "february", "march", "april", "may",
+          "june", "july", "august", "september", "october",
+          "work", "would", "that", "works", "good", "fine", "ok", "okay", "yes",
+          "26th", "27th", "28th", "29th", "30th", "31st", "1st", "2nd", "3rd",
+          "am", "pm", "morning", "afternoon", "evening"
+        ]
+
+        # If it's from the expected sender, be more lenient with body matching
+        if from_match do
+          # Any date/time keyword is enough if from the right sender
+          Enum.any?(date_time_patterns, fn keyword ->
+            String.contains?(email_body, keyword)
+          end)
+        else
+          true # If sender doesn't match, don't use body matching
+        end
       else
         true
       end
 
-    from_match && subject_match
+    result = from_match && (subject_match || body_match)
+
+    if result do
+      Logger.info("Email matches task: from=#{email.from}, subject=#{email.subject}")
+    end
+
+    result
   end
 
   defp process_task_response(task, email) do

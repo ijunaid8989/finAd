@@ -7,7 +7,8 @@ defmodule FinancialAdvisor.Services.TaskProcessor do
     AIAgent,
     GmailService,
     CalendarService,
-    EmailMonitorService
+    EmailMonitorService,
+    HubspotService
   }
   import Ecto.Query
 
@@ -22,15 +23,27 @@ defmodule FinancialAdvisor.Services.TaskProcessor do
 
   def process_waiting_tasks do
     # Check for email responses to waiting tasks
+    # This is called frequently to check if responses have arrived
     User
     |> where([u], not is_nil(u.google_access_token))
     |> Repo.all()
     |> Enum.each(fn user ->
-      EmailMonitorService.check_for_task_responses(user.id)
+      # Check if this user has any waiting tasks before syncing
+      waiting_count =
+        Task
+        |> where([t], t.user_id == ^user.id)
+        |> where([t], t.status == "waiting_for_response")
+        |> Repo.aggregate(:count, :id)
+
+      if waiting_count > 0 do
+        Logger.info("User #{user.email} has #{waiting_count} waiting task(s), checking for responses...")
+        EmailMonitorService.check_for_task_responses(user.id)
+      end
     end)
   end
 
-  defp process_task(task) do
+  # Process a specific task (public function for immediate processing)
+  def process_task(task) do
     Logger.info("Processing task: #{task.id} - #{task.title}")
 
     user = Repo.preload(task, :user).user
@@ -102,8 +115,61 @@ defmodule FinancialAdvisor.Services.TaskProcessor do
 
   defp execute_schedule_appointment(user, task) do
     # Extract contact info from task metadata
-    _contact_name = get_in(task.metadata, ["contact_name"])
-    contact_email = get_in(task.metadata, ["contact_email"])
+    # Try both string and atom keys for compatibility
+    metadata = task.metadata || %{}
+    contact_name = get_in(metadata, ["contact_name"]) || get_in(metadata, [:contact_name]) || ""
+    contact_email = get_in(metadata, ["contact_email"]) || get_in(metadata, [:contact_email])
+
+    Logger.info("Executing schedule appointment task: contact=#{contact_name}, email=#{contact_email}")
+    Logger.info("Task metadata: #{inspect(metadata)}")
+
+    # If contact_email is missing, try to extract from tool_calls
+    contact_email =
+      if contact_email do
+        contact_email
+      else
+        # Try to get from tool_calls input
+        case task.tool_calls do
+          [%{"name" => "schedule_appointment", "input" => input} | _] ->
+            input["contact_email"] || input[:contact_email]
+
+          _ ->
+            nil
+        end
+      end
+
+    # If contact_name is missing but we have email, try to find the contact
+    contact_name =
+      if contact_name && contact_name != "" do
+        contact_name
+      else
+        # Try to get from tool_calls
+        case task.tool_calls do
+          [%{"name" => "schedule_appointment", "input" => input} | _] ->
+            input["contact_name"] || input[:contact_name] || ""
+
+          _ ->
+            ""
+        end
+      end
+
+    # If we still don't have contact_email, try to find it by contact_name
+    contact_email =
+      if is_nil(contact_email) && contact_name && contact_name != "" do
+        Logger.info("Contact email not in metadata, searching for contact: #{contact_name}")
+        case HubspotService.search_contacts(user, contact_name) do
+          {:ok, [contact | _]} ->
+            props = contact["properties"] || %{}
+            found_email = props["email"] || props["Email"]
+            Logger.info("Found contact email: #{found_email}")
+            found_email
+
+          _ ->
+            nil
+        end
+      else
+        contact_email
+      end
 
     if contact_email do
       # Get available times from calendar
@@ -116,8 +182,12 @@ defmodule FinancialAdvisor.Services.TaskProcessor do
           subject = "Scheduling Request: #{task.title}"
           body = build_scheduling_email_body(task, available_times)
 
+          Logger.info("Sending scheduling email to #{contact_email}")
+
           case GmailService.send_email(user, contact_email, subject, body) do
-            {:ok, _} ->
+            {:ok, result} ->
+              Logger.info("Email sent successfully to #{contact_email}: #{inspect(result)}")
+
               # Create waiting task for response
               conversation = Repo.preload(task, :conversation).conversation
 
@@ -131,17 +201,22 @@ defmodule FinancialAdvisor.Services.TaskProcessor do
                 ["Re:", "Schedule", "Appointment", "Time"]
               )
 
-              {:ok, %{email_sent: true, waiting_for_response: true}, :waiting}
+              {:ok, %{email_sent: true, waiting_for_response: true, email_to: contact_email}, :waiting}
 
             {:error, reason} ->
-              {:error, "Failed to send email: #{inspect(reason)}"}
+              Logger.error("Failed to send email to #{contact_email}: #{inspect(reason)}")
+              {:error, "Failed to send email to #{contact_email}: #{inspect(reason)}"}
           end
 
         {:error, reason} ->
+          Logger.error("Failed to get calendar events: #{inspect(reason)}")
           {:error, "Failed to get calendar: #{inspect(reason)}"}
       end
     else
-      {:error, "Contact email not found in task metadata"}
+      error_msg = "Contact email not found in task metadata"
+      error_msg = if contact_name && contact_name != "", do: "#{error_msg} for contact: #{contact_name}", else: error_msg
+      Logger.error("#{error_msg}. Task ID: #{task.id}, Metadata: #{inspect(task.metadata)}, Tool calls: #{inspect(task.tool_calls)}")
+      {:error, error_msg}
     end
   end
 

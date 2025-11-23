@@ -22,6 +22,7 @@ defmodule FinancialAdvisor.Scheduler do
   def init(_opts) do
     schedule_sync_work()
     schedule_event_polling()
+    schedule_task_checking() # Check for task responses more frequently
     {:ok, %{}}
   end
 
@@ -45,6 +46,14 @@ defmodule FinancialAdvisor.Scheduler do
     CalendarService.poll_new_events()
 
     schedule_event_polling()
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:check_waiting_tasks, state) do
+    Logger.info("Checking for waiting task responses...")
+    TaskProcessor.process_waiting_tasks()
+    schedule_task_checking()
     {:noreply, state}
   end
 
@@ -125,13 +134,18 @@ defmodule FinancialAdvisor.Scheduler do
     |> Enum.each(&EmbeddingsService.embed_contact/1)
   end
 
-  # Schedule sync every 5 minutes
+  # Schedule sync every 1 minute for faster response detection
   defp schedule_sync_work do
-    Process.send_after(self(), :sync_data, 5 * 60 * 1000)
+    Process.send_after(self(), :sync_data, 1 * 60 * 1000)
   end
 
   # Schedule event polling every 2 minutes for real-time event detection
   defp schedule_event_polling do
     Process.send_after(self(), :poll_events, 2 * 60 * 1000)
+  end
+
+  # Check for waiting task responses every 30 seconds
+  defp schedule_task_checking do
+    Process.send_after(self(), :check_waiting_tasks, 30 * 1000)
   end
 end
